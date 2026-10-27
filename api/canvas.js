@@ -22,6 +22,17 @@ import {
   parseProxyRequestUrl,
 } from './_canvasProxyHelpers.js'
 
+// Read the body as raw bytes rather than relying on Vercel's automatic
+// req.body JSON parsing — "dumb pass-through" means forwarding exactly what
+// the caller sent, not re-serializing a parsed copy of it.
+export const config = { api: { bodyParser: false } }
+
+async function readRawBody(req) {
+  const chunks = []
+  for await (const chunk of req) chunks.push(chunk)
+  return Buffer.concat(chunks)
+}
+
 function setCors(req, res) {
   const origin = req.headers.origin
   if (isAllowedOrigin(origin)) {
@@ -62,8 +73,9 @@ export default async function handler(req, res) {
       'Accept': 'application/json',
     },
   }
-  if (!['GET', 'HEAD', 'DELETE'].includes(req.method) && req.body && Object.keys(req.body).length) {
-    init.body = JSON.stringify(req.body)
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    const rawBody = await readRawBody(req)
+    if (rawBody.length) init.body = rawBody
   }
 
   let upstream
