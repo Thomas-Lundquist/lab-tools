@@ -10,7 +10,7 @@ import Skeleton from '../../components/Skeleton.jsx'
 import { useToast } from '../../components/Toast.jsx'
 import { getSections } from '../../api/sections.js'
 import { getAssignments, createAssignment } from '../../api/assignments.js'
-import { createOverride, getOverrides } from '../../api/overrides.js'
+import { createOverride, updateOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, addModuleItem } from '../../api/modules.js'
 import { getCourseSetup, getLabs, saveLab, isStandalone } from '../../storage/setup.js'
 import { isProfessionalismAssignment } from './scoring.js'
@@ -453,6 +453,16 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       const journalDueOffset   = courseSetup.settings.journalDueOffsetDays ?? 1
       const journalCloseOffset = courseSetup.settings.labCloseDateOffsetDays ?? 14
 
+      // Retrying after a partial failure (or reusing an existing assignment)
+      // can mean a section already has an override here — Canvas rejects a
+      // second one for the same section outright ("already assigned more
+      // than once"), so look up what's already there and update it instead
+      // of blindly creating a duplicate.
+      const existingProfOverrides = await getOverrides(courseId, assignment.id)
+      const profOverrideBySection = new Map(existingProfOverrides.map(o => [o.courseSectionId, o]))
+      const existingJournalOverrides = standalone ? [] : await getOverrides(courseId, journalId)
+      const journalOverrideBySection = new Map(existingJournalOverrides.map(o => [o.courseSectionId, o]))
+
       // Each in-scope section gets a professionalism override (open/due/close on
       // its lab date) and, for pairings, a journal override (open on the lab
       // date, due and close offset from settings). A scoped create still writes
@@ -461,17 +471,29 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       for (const sec of targetSections) {
         const labDate = sectionDueDates[sec.id]
         if (!scoped && !labDate) continue
-        await createOverride(courseId, assignment.id, {
+        const profFields = {
           courseSectionId: sec.id,
           ...(labDate ? professionalismOverrideDates(labDate) : {}),
           title: sec.name,
-        })
+        }
+        const existingProfOverride = profOverrideBySection.get(sec.id)
+        if (existingProfOverride) {
+          await updateOverride(courseId, assignment.id, existingProfOverride.id, profFields)
+        } else {
+          await createOverride(courseId, assignment.id, profFields)
+        }
         if (!standalone && labDate) {
-          await createOverride(courseId, journalId, {
+          const journalFields = {
             courseSectionId: sec.id,
             ...journalOverrideDates(labDate, journalDueOffset, journalCloseOffset),
             title: sec.name,
-          })
+          }
+          const existingJournalOverride = journalOverrideBySection.get(sec.id)
+          if (existingJournalOverride) {
+            await updateOverride(courseId, journalId, existingJournalOverride.id, journalFields)
+          } else {
+            await createOverride(courseId, journalId, journalFields)
+          }
         }
       }
 
