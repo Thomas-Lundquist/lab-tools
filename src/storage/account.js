@@ -12,7 +12,7 @@ export async function getCanvasUrl() {
 }
 
 export async function saveAccount({ canvasUrl, token, userName }) {
-  const encryptedToken = await encryptToken(token)
+  const encryptedToken = await encryptToken(token.trim())
   const account = {
     canvasUrl: canvasUrl.replace(/\/$/, ''),
     apiToken: encryptedToken,
