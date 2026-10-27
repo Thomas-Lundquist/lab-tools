@@ -448,6 +448,13 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         onlyVisibleToOverrides: scoped,
       })
 
+      // Record the assignment as soon as it exists in Canvas, not after the
+      // whole flow succeeds — otherwise a failure anywhere below (overrides,
+      // module item) leaves this out of the in-memory list, so a retry can't
+      // find it by name and creates another duplicate assignment instead of
+      // reusing the one that already exists.
+      if (!existing) setAssignments(prev => [...prev, assignment])
+
       if (moduleId) await addModuleItem(courseId, moduleId, assignment.id)
 
       const journalDueOffset   = courseSetup.settings.journalDueOffsetDays ?? 1
@@ -507,7 +514,6 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         closeDates: {},
       })
 
-      if (!existing) setAssignments(prev => [...prev, assignment])
       setEntries(prev => [...prev, entry])
       const verb = existing ? `Reused the existing "${assignment.name}"` : `Created "${assignment.name}"`
       toast(standalone ? `${verb} as a standalone` : `${verb} and paired it with its journal`, 'success')
