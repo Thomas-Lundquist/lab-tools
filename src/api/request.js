@@ -2,20 +2,31 @@ import { getCanvasUrl } from '../storage/account.js'
 import { getDecryptedToken } from '../storage/encryption.js'
 import { AuthError, RateLimitError, NotFoundError, ApiError } from './errors.js'
 
+// Canvas sends no CORS headers (Instructure cloud instances can't be
+// configured to), so a browser fetch straight to Canvas is blocked before it
+// ever reaches the server. Every request instead goes through our own
+// same-origin proxy (api/canvas/[...path].js), which forwards it
+// server-to-server where CORS doesn't apply. X-Canvas-Base tells the proxy
+// which Canvas instance to forward to; it must be re-read on every call
+// (not just in buildUrl) because canvasGetAll follows pagination URLs that
+// bypass buildUrl entirely.
+const PROXY_PREFIX = '/api/canvas'
+
 let rateLimitBackoffUntil = null
 
 async function getAuthHeaders() {
   const token = await getDecryptedToken()
   if (!token) throw new AuthError('No API token found. Please complete setup.')
+  const canvasUrl = await getCanvasUrl()
   return {
     'Authorization': `Bearer ${token}`,
     'Content-Type': 'application/json',
+    'X-Canvas-Base': canvasUrl,
   }
 }
 
 async function buildUrl(path, params = {}) {
-  const baseUrl = await getCanvasUrl()
-  const url = new URL(`${baseUrl}${path}`)
+  const url = new URL(`${PROXY_PREFIX}${path}`, window.location.origin)
   url.searchParams.set('per_page', '100')
   for (const [key, value] of Object.entries(params)) {
     if (Array.isArray(value)) {
@@ -63,7 +74,7 @@ function extractTotalEstimate(linkHeader) {
   const match = linkHeader.match(/<([^>]*)>;\s*rel="last"/)
   if (!match) return null
   try {
-    const url = new URL(match[1])
+    const url = new URL(match[1], window.location.origin)
     const lastPage = parseInt(url.searchParams.get('page') ?? '')
     const perPage = parseInt(url.searchParams.get('per_page') ?? '')
     if (!lastPage || !perPage) return null

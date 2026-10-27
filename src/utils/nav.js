@@ -3,9 +3,7 @@
 // router, same as the extension this was ported from. Paths look like
 // "src/pages/labs/index.html"; chrome.runtime.getURL used to resolve these
 // against the extension's own origin, so on the web a root-relative URL is
-// the direct equivalent. BASE_URL accounts for GitHub Pages serving this
-// app from a subpath (/lab-tools/) instead of the domain root.
+// the direct equivalent.
 export function pageUrl(path) {
-  const relative = path.startsWith('/') ? path.slice(1) : path
-  return import.meta.env.BASE_URL + relative
+  return path.startsWith('/') ? path : `/${path}`
 }

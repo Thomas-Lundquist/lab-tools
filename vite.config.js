@@ -6,11 +6,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
-// GitHub Pages serves this repo from /lab-tools/, not the domain root — but
-// `npm run dev` should keep serving from / so the documented localhost:5175
-// workflow doesn't change. Only the production build gets the subpath base.
-export default defineConfig(({ command }) => ({
-  base: command === 'build' ? '/lab-tools/' : '/',
+export default defineConfig({
   plugins: [
     react(),
     VitePWA({
@@ -32,9 +28,11 @@ export default defineConfig(({ command }) => ({
       },
       // No runtimeCaching routes: Canvas API responses must never be cached
       // or served offline (see CLAUDE.md — attendance/grade state is always
-      // re-derived live from Canvas). The default precache below only covers
-      // this app's own build output (JS/CSS/HTML/icons), so cross-origin
-      // Canvas requests pass through the service worker untouched.
+      // re-derived live from Canvas). The precache manifest below only
+      // covers this app's own build output (JS/CSS/HTML/icons) — it can't
+      // and doesn't include /api/canvas/* (a serverless function, not a
+      // static asset), so those requests pass through the service worker
+      // untouched, same as the direct-to-Canvas fetches this proxy replaced.
       workbox: {
         cleanupOutdatedCaches: true,
       },
@@ -55,4 +53,4 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-}))
+})
