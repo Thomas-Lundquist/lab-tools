@@ -7,7 +7,20 @@
 // the request/response byte-for-byte. It forwards whatever bearer token the
 // caller sends — it never holds its own Canvas credential — and it never
 // logs or persists request or response bodies.
-import { getAllowedHosts, isAllowedCanvasBase, rewriteLinkHeader, isAllowedOrigin } from './_proxyHelpers.js'
+//
+// This is a single named function (not api/canvas/[...path].js) because
+// Vercel's catch-all [...param] filesystem routing is a Next.js-only
+// convention and silently 404s on a plain Vite project. vercel.json rewrites
+// every /api/canvas/* request here instead, so the real Canvas path and
+// query are recovered from the request's own URL — see
+// parseProxyRequestUrl in _canvasProxyHelpers.js.
+import {
+  getAllowedHosts,
+  isAllowedCanvasBase,
+  rewriteLinkHeader,
+  isAllowedOrigin,
+  parseProxyRequestUrl,
+} from './_canvasProxyHelpers.js'
 
 function setCors(req, res) {
   const origin = req.headers.origin
@@ -38,13 +51,8 @@ export default async function handler(req, res) {
     return
   }
 
-  const pathSegments = Array.isArray(req.query.path) ? req.query.path : [req.query.path].filter(Boolean)
-  const targetUrl = new URL('/' + pathSegments.join('/'), canvasBase)
-  for (const [key, value] of Object.entries(req.query)) {
-    if (key === 'path') continue
-    const values = Array.isArray(value) ? value : [value]
-    values.forEach(v => targetUrl.searchParams.append(key, v))
-  }
+  const { targetPath, search } = parseProxyRequestUrl(req.url)
+  const targetUrl = new URL(targetPath + search, canvasBase)
 
   const init = {
     method: req.method,

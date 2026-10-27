@@ -5,7 +5,8 @@ import {
   isAllowedCanvasBase,
   rewriteLinkHeader,
   isAllowedOrigin,
-} from './_proxyHelpers.js'
+  parseProxyRequestUrl,
+} from './_canvasProxyHelpers.js'
 
 test('getAllowedHosts defaults to graniteschools.instructure.com', () => {
   assert.deepEqual(getAllowedHosts({}), ['graniteschools.instructure.com'])
@@ -77,4 +78,16 @@ test('isAllowedOrigin rejects an unrelated origin', () => {
 test('isAllowedOrigin rejects undefined/empty origin', () => {
   assert.equal(isAllowedOrigin(undefined), false)
   assert.equal(isAllowedOrigin(''), false)
+})
+
+test('parseProxyRequestUrl strips the proxy prefix and keeps the query string', () => {
+  const result = parseProxyRequestUrl('/api/canvas/api/v1/courses/1/assignments?per_page=100&include%5B%5D=overrides')
+  assert.equal(result.targetPath, '/api/v1/courses/1/assignments')
+  assert.equal(result.search, '?per_page=100&include%5B%5D=overrides')
+})
+
+test('parseProxyRequestUrl handles a bare path with no query string', () => {
+  const result = parseProxyRequestUrl('/api/canvas/api/v1/users/self')
+  assert.equal(result.targetPath, '/api/v1/users/self')
+  assert.equal(result.search, '')
 })

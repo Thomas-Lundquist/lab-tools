@@ -53,3 +53,18 @@ export function isAllowedOrigin(origin) {
     return false
   }
 }
+
+// Vercel's filesystem API routing only honors Next.js-style [...catchAll]
+// segments inside a Next.js app; in a plain Vite project a file named
+// api/canvas/[...path].js is never deployed as a route at all (confirmed:
+// it 404s at the platform level, before the function even runs). The
+// workaround is a single named function (api/canvas.js) reached via an
+// explicit vercel.json rewrite for /api/canvas/:path* — which means this
+// function has to recover the real Canvas path and query itself from the
+// request's own URL rather than from a Vercel-provided route param.
+export function parseProxyRequestUrl(reqUrl) {
+  const { pathname, search } = new URL(reqUrl, 'http://internal')
+  const rest = pathname.startsWith(PROXY_PREFIX) ? pathname.slice(PROXY_PREFIX.length) : pathname
+  const targetPath = rest.startsWith('/') ? rest : `/${rest}`
+  return { targetPath, search }
+}
