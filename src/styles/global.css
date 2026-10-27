@@ -1,0 +1,865 @@
+/* Self-hosted fonts (bundled at build time, no runtime CDN — see CLAUDE.md
+   security rule 6). Inter only for now — a separate heading face (Oswald,
+   then IBM Plex Mono were both tried and reverted) is deferred; see
+   design_docs/10 § Typography. Weight subset matches the font-* utility
+   classes in use. */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/inter/900.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* "Default" theme (Accessible & Ethical) token values — the palette this
+   :root block defines. "Bauhaus" (the shipped-default palette) overrides
+   the relevant tokens below in the [data-theme="bauhaus"] block. Palette is
+   chosen via Settings > Style (prefs.palette), applied via applyPalette()
+   (src/utils/color.js) setting data-theme on <html>. No per-color
+   customization — see design_docs/10 § Themes. */
+:root {
+  /* Typography — body/heading font pairing (design_docs/10 § Typography).
+     --font-heading is a separate token on purpose, even though it's Inter
+     too right now — the heading-face decision is deferred, not abandoned;
+     swapping the pairing later is a one-line change here. */
+  --font-body:    'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-body);
+
+  /* ──────────────────────────────────────────────────────────────
+     PRIMITIVE RAMPS (1yr.1) — raw scale. Semantic tokens below alias
+     onto these. Components consume the SEMANTIC layer, never these.
+     ────────────────────────────────────────────────────────────── */
+
+  /* Warm grey — hue 35°, contrast-verified against white. Fixed.
+     Ratios below are vs white; every text step also clears AA (4.5) on the
+     darkest fill it sits on in either palette (Bauhaus's #EFEEEA inset).
+     grey-500 used to be #7B7060 — AA on white but 4.18 on that inset fill. */
+  --grey-50:  #F9F8F6;   /* page bg / lightest surface */
+  --grey-100: #F2F0EE;   /* hover / subtle fill */
+  --grey-200: #E6E3E0;   /* subtle border */
+  --grey-300: #D8D4D0;   /* default border (decorative — dividers, cards) */
+  --grey-400: #8E877F;   /* disabled text / control borders (3.55 — non-text 3:1) */
+  --grey-500: #675E52;   /* muted text (6.36) */
+  --grey-600: #4F4A43;   /* secondary text (8.78) */
+  --grey-700: #433E38;   /* strong text (10.58) */
+  --grey-900: #221F1C;   /* body text (16.40) */
+
+  /* Primary blue — hue 225° (warm blue). Fixed ramp for the Default theme. */
+  --primary-50:  #EEF1FC;   /* focus-tint bg / selected row */
+  --primary-100: #D4DDF7;   /* light tint */
+  --primary-200: #A9BBEF;   /* tint border */
+  --primary-300: #7892E3;   /* disabled accent */
+  --primary-400: #5677DC;   /* AA-large only */
+  --primary-500: #2B54D4;   /* accent fill, white-on-fill 6.32 */
+  --primary-600: #2348B8;   /* hover, white-on-fill 7.81 */
+  --primary-700: #1C3C9C;   /* active */
+  --primary-900: #132A72;   /* accent text on light bg */
+
+  /* Label text on accent fills. White for the default blue. */
+  --primary-contrast: #FFFFFF;
+
+  /* Brand accent — Default theme value; [data-theme="bauhaus"] overrides
+     these to the fixed Bauhaus Red. */
+  --cpt-color:      var(--primary-500);
+  --cpt-color-dark: var(--primary-600);
+  --cpt-color-rgb:  43, 84, 212;
+  /* The accent used as *foreground* — text, icons, active-tab underline,
+     focus ring. Separate from --cpt-color (a *fill* under white text) because
+     no single value can do both jobs in dark mode: a fill dark enough for
+     white text is far too dark to read as text on a dark page. */
+  --cpt-color-text: var(--primary-600);
+
+  /* ──────────────────────────────────────────────────────────────
+     SPACING SCALE (1yr.1) — rem-based so it scales with data-text-size.
+     Constrained on purpose (steps skipped to kill decision fatigue).
+     ────────────────────────────────────────────────────────────── */
+  --space-1: 0.25rem;   /* icon ↔ label; tightest */
+  --space-2: 0.5rem;    /* tightly-related inline controls */
+  --space-3: 0.75rem;   /* default gap between controls */
+  --space-4: 1rem;      /* list-row padding, form field gap */
+  --space-5: 1.5rem;    /* card padding, gap between groups */
+  --space-6: 2rem;      /* gap between page sections */
+  --space-8: 3rem;      /* major page divisions, page top margin */
+
+  /* ── Semantic surface tokens (light mode) → grey ramp ── */
+  --color-bg-page:        var(--grey-50);
+  --color-bg-surface:     #FFFFFF;
+  --color-bg-sidebar:     var(--grey-100);
+  --color-bg-hover:       var(--grey-100);
+
+  /* ── Text tokens (light mode) → grey ramp ── */
+  --color-text-body:      var(--grey-900);
+  --color-text-secondary: var(--grey-600);
+  --color-text-muted:     var(--grey-500);
+  --color-text-disabled:  var(--grey-400);
+
+  /* ── Border tokens (light mode) → grey ramp ── */
+  --color-border:         var(--grey-300);
+  --color-border-subtle:  var(--grey-200);
+  /* Boundary of an interactive control (input, select, secondary button,
+     segmented control) — WCAG 1.4.11 needs 3:1 against the surface, which the
+     decorative --color-border (1.47) doesn't come close to. */
+  --color-border-strong:  var(--grey-400);
+
+  /* ── Semantic status tokens (light mode) ──
+     Used as text, so each clears AA on its own 12% Callout/Toast tint too. */
+  --color-success:        #1B6B30;
+  --color-warning:        #8A4A00;
+  --color-error:          #B01A25;
+  --color-info:           #1A5FB4;
+  /* Fill behind white text (.btn-danger). Kept separate from --color-error
+     for the same reason as --cpt-color-text: dark mode's error *text* is a
+     light pink that white text can't sit on. */
+  --color-danger-fill:    #C01C28;
+  /* Fill behind white text (.btn-success). Separate from --color-success for
+     the same reason — dark mode's success *text* is a light green. One value
+     works in both modes; white sits on it. */
+  --color-success-fill:   #15803D;
+
+  /* ── Elevation shadows (layered ambient + key) ── */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04);
+  --shadow-xl: 0 20px 25px rgba(0,0,0,0.08), 0 10px 10px rgba(0,0,0,0.03);
+
+  /* ──────────────────────────────────────────────────────────────
+     BAUHAUS DESIGN TOKENS (design_docs/10) — shipped-default theme.
+     Consumed via the [data-theme="bauhaus"] override block below,
+     which re-points the semantic tokens above at these values. Raw
+     per-tool markup (rounded-lg, shadow-sm used directly in JSX
+     rather than through a shared component class) still needs each
+     tool's own rebuild — tracked in canvas-power-tools-1yr.4.
+     ────────────────────────────────────────────────────────────── */
+  --color-canvas-paper:     #FAF9F5;  /* page background */
+  --color-container-inset:  #EFEEEA;  /* secondary container fill */
+  --color-stroke:           #1B1C1A;  /* primary 1px border / text */
+  --color-stroke-soft:      #4A4E69;  /* alternate 1px border */
+  --color-grid-divider:     #E3E2DF;  /* interior table dividers */
+
+  /* Primary triad */
+  --color-bauhaus-red:      #B7102A;
+  --color-bauhaus-blue:     #485F84;
+  --color-bauhaus-blue-bright: #2563EB;
+  --color-bauhaus-ochre:    #7A5500;
+  --color-bauhaus-ochre-light: #FEF08A;
+
+  /* Domain top-accent colors — one per Module */
+  --color-domain-assignments:   #2563EB;  /* Cobalt Blue */
+  --color-domain-grading:       #059669;  /* Emerald Green */
+  --color-domain-communication: #7C3AED;  /* Purple */
+  --color-domain-communication-rgb: 124, 58, 237;  /* rgb of the purple above, for rgba() accent tints */
+  --color-domain-people:        #EA580C;  /* Orange */
+  --color-domain-content:       #0D9488;  /* Teal */
+  --color-domain-setup:         #334155;  /* Dark Slate */
+  --color-domain-alert:         #B7102A;  /* Bauhaus Red */
+
+  /* Categorical palette — hashed per-item (e.g. Canvas Assignment Groups,
+     src/utils/groupColors.js), not tied to a fixed meaning like the domain
+     colors above. Theme-independent: unlike the Bauhaus mechanics, category
+     color coding is useful under Default too (design_docs/10 § Data Tables). */
+  --color-cat-1: #2563EB;  /* blue */
+  --color-cat-2: #059669;  /* green */
+  --color-cat-3: #7C3AED;  /* purple */
+  --color-cat-4: #EA580C;  /* orange */
+  --color-cat-5: #0D9488;  /* teal */
+  --color-cat-6: #DB2777;  /* pink */
+  --color-cat-7: #B45309;  /* amber */
+  --color-cat-8: #334155;  /* slate */
+
+  /* Flat corner radii — replaces rounded-lg/rounded-xl/rounded-2xl */
+  --radius-none: 0px;
+  --radius-xs:   1px;
+  --radius-sm:   2px;
+
+  /* Default theme (Accessible & Ethical) — 44x44px minimum tappable area */
+  --touch-target-min: 2.75rem;
+
+  /* ── Structural tokens the shared component layer (below) reads, so
+     [data-theme="bauhaus"] can reskin shape/elevation, not just color.
+     Default theme values here match the pre-existing look. ── */
+  --radius-control: 0.5rem;    /* buttons, inputs, segmented-control */
+  --radius-card:    0.375rem;  /* card */
+}
+
+/* Text size — set via data-text-size attribute by applyTextSize() and theme-init.js
+   (see utils/color.js for the valid keys, and public/theme-init.js for the
+   pre-paint pass that applies the saved one before first render).
+
+   Percentages, not px, and this is the one place that distinction matters.
+   An absolute font-size on the root *replaces* the browser's default font size,
+   so a reader who set theirs to 24px for low vision would be handed 15px and
+   left with only page zoom. A percentage scales their preference instead of
+   discarding it, which is what WCAG 2.1 AA expects of us (CLAUDE.md).
+
+   On the root element %, em and rem all resolve against the inherited/initial
+   font size — the browser default — so there is no circular reference. % is
+   used here because rem on the root *reads* self-referential even though it is
+   well defined.
+
+   Ratios are against a 16px default, so rendering is unchanged for anyone on
+   the standard setting: 13/15/17/20px as before. (That makes "medium" 93.75%
+   rather than a round 100% — the design baseline is 15px, and normalising it
+   would resize every tool, so it is left alone deliberately.) */
+:root[data-text-size="small"]       { font-size: 81.25%; }  /* 13/16 */
+:root[data-text-size="medium"]      { font-size: 93.75%; }  /* 15/16 */
+:root[data-text-size="large"]       { font-size: 106.25%; } /* 17/16 */
+:root[data-text-size="extra-large"] { font-size: 125%; }    /* 20/16 */
+
+/* ──────────────────────────────────────────────────────────────
+   CONTENT PREVIEW PANE (components/ContentPreview.jsx)
+
+   Width lives here, not in the component, because the right answer is a
+   *layout mode* rather than a number and only a media query can pick it.
+
+   Two constraints pull against each other: Canvas lays course content out in
+   roughly a 60rem column, and the tables need 61.5–67.5rem before they scroll.
+   Above the breakpoint both roughly fit, so the pane docks and the table gives
+   (scrolled, it still shows title and status; a squeezed preview misleads).
+   Below it neither fits at any width, so the pane overlays instead — squeezing
+   both into uselessness is the wrong answer, and an earlier version that capped
+   the width with calc(100vw - 30rem) collapsed the pane to ~96px at high zoom.
+
+   Note the units. `rem` here tracks the text-size setting above (13–20px), so
+   these values rescale with it — but the media query's `em` resolves against
+   the *browser default* font-size, which no page rule can change. That is
+   deliberate: the breakpoint stays put across every text-size setting, which is
+   what keeps the mode switch predictable.
+
+   Nothing else has to know this width. The bulk action bars are absolutely
+   positioned inside the table column, so they size to whatever space the pane
+   leaves — including none, in overlay mode.
+   ────────────────────────────────────────────────────────────── */
+:root {
+  --cpt-pane-width: clamp(30rem, 46vw, 56rem);
+}
+
+.cpt-preview-pane {
+  width: var(--cpt-pane-width);
+}
+
+@media (max-width: 64em) {
+  :root {
+    --cpt-pane-width: min(100% - 3rem, 44rem);
+  }
+
+  /* Overlay the table rather than shrink it. The flex row that hosts the pane
+     is position:relative for exactly this. */
+  .cpt-preview-pane {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+  }
+}
+
+@layer base {
+  body {
+    background-color: var(--color-bg-page);
+    color: var(--color-text-body);
+    font-family: var(--font-body);
+    @apply antialiased;
+    scrollbar-gutter: stable;
+    font-optical-sizing: auto;
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+  }
+  /* Headings get the display face; Tailwind's preflight already resets their
+     size/weight, so this only needs to set the family. Any component may also
+     opt in explicitly via the .font-heading utility (e.g. Modal titles render
+     an <h2>, which is covered automatically — this exists for non-heading
+     elements that carry title styling, like PageHeader's back-link row). */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+  /* Checkboxes and radio buttons pick up the brand color automatically */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--cpt-color);
+  }
+  /* Keyboard focus ring — accent-colored, suppressed for mouse clicks */
+  :focus-visible {
+    outline: 2px solid var(--cpt-color-text);
+    outline-offset: 1px;
+    border-radius: 0;
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors duration-75 disabled:opacity-50 disabled:cursor-not-allowed;
+    border-radius: var(--radius-control);
+  }
+  .btn-primary {
+    @apply btn text-white;
+    background-color: var(--cpt-color);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--cpt-color-dark);
+  }
+  .btn-primary:active:not(:disabled) {
+    background-color: var(--cpt-color-dark);
+    filter: brightness(0.92);
+  }
+  .btn-secondary {
+    @apply btn border;
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-body);
+    border-color: var(--color-border-strong);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-bg-hover);
+  }
+  .btn-secondary:active:not(:disabled) {
+    background-color: var(--color-bg-hover);
+    filter: brightness(0.96);
+  }
+  .btn-danger {
+    @apply btn text-white;
+    background-color: var(--color-danger-fill);
+  }
+  .btn-danger:hover:not(:disabled) {
+    /* Darken only the background so the white label stays crisp. */
+    background-color: color-mix(in srgb, var(--color-danger-fill) 90%, black);
+  }
+  .btn-danger:active:not(:disabled) {
+    background-color: color-mix(in srgb, var(--color-danger-fill) 82%, black);
+  }
+  .btn-success {
+    @apply btn text-white;
+    background-color: var(--color-success-fill);
+  }
+  .btn-success:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--color-success-fill) 90%, black);
+  }
+  .btn-success:active:not(:disabled) {
+    background-color: color-mix(in srgb, var(--color-success-fill) 82%, black);
+  }
+  .btn-ghost {
+    @apply btn;
+    color: var(--color-text-secondary);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--color-bg-hover);
+    color: var(--color-text-body);
+  }
+  .btn-ghost:active:not(:disabled) {
+    background-color: var(--color-bg-hover);
+    filter: brightness(0.96);
+  }
+  .input {
+    @apply block w-full px-3 py-2 text-sm disabled:cursor-not-allowed;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-sm);
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-body);
+  }
+  .input::placeholder {
+    color: var(--color-text-muted);
+  }
+  .input:disabled {
+    background-color: var(--color-bg-hover);
+  }
+  .input:focus-visible {
+    border-color: var(--cpt-color-text);
+    box-shadow: 0 0 0 1px rgba(var(--cpt-color-rgb), 0.25);
+  }
+  /* Replace native OS arrow with a consistent custom SVG chevron.
+     appearance:none removes the OS arrow; background-image provides ours.
+     background-position places the arrow 12px from the right border.
+     padding-right: 2.5rem keeps text from running under the arrow. */
+  select.input {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 2.5rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 12px 12px;
+  }
+  /* Native selects outside .input also get a themed focus ring */
+  select:focus-visible {
+    border-color: var(--cpt-color-text);
+    box-shadow: 0 0 0 1px rgba(var(--cpt-color-rgb), 0.25);
+  }
+  .label {
+    @apply block text-sm font-medium mb-1;
+    color: var(--color-text-secondary);
+  }
+  .card {
+    border-radius: var(--radius-card);
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+  }
+  /* Per-Module domain accent strip (design_docs/10 §2) — Bauhaus-only visual
+     mechanic; a no-op under Default (doc 10: "do not carry over"). Caller sets
+     --domain-color to the relevant --color-domain-* token. */
+  .domain-accent {
+    border-top: 0 solid var(--domain-color, transparent);
+  }
+  /* Bauhaus data-table header treatment (design_docs/10 § Data Tables) — a
+     no-op under Default, which keeps its existing sans-serif header style. */
+  .table-header-cell {
+    border-right: 0 solid var(--color-grid-divider);
+  }
+  /* Bauhaus data-table toolbar tint (design_docs/10 § Data Tables) — a no-op
+     under Default, which keeps FilterBar's current plain background. */
+  .table-toolbar {
+    background-color: transparent;
+  }
+  /* Badge shape/border — pill + no border under Default (existing look);
+     flat radius ceiling + 1px currentColor border under Bauhaus, per doc 10's
+     "high-contrast 1px border badges with explicit status fills". Border is
+     0-width by default so it's a no-op unless the theme override below fires;
+     'neutral' tone already sets its own inline border and wins over this. */
+  .badge-pill {
+    border-radius: 9999px;
+    border: 0 solid currentColor;
+  }
+  /* Card title bar (design_docs/10 § Component Taxonomy) — the header strip a
+     titled .card carries. Default: a clean muted uppercase label on a 1px
+     bottom rule. Bauhaus override below turns it into the signature inset-fill
+     monospace bar. Reusable across Library sidebar, list, editor, deploy. */
+  .card-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-text-muted);
+  }
+  /* section-title kept as alias for backwards compatibility; use section-label going forward */
+  .section-title {
+    @apply text-xs font-medium uppercase tracking-widest mb-3;
+    color: var(--color-text-muted);
+  }
+  .section-label {
+    @apply block font-medium mb-2 uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    color: var(--color-text-muted);
+  }
+  .filter-active {
+    border-color: var(--cpt-color-text);
+    color: var(--cpt-color-text);
+    background-color: rgba(var(--cpt-color-rgb), 0.06);
+  }
+  .segmented-control {
+    display: inline-flex;
+    border-radius: var(--radius-control);
+    overflow: hidden;
+    border: 1px solid var(--color-border-strong);
+    background-color: var(--color-bg-hover);
+  }
+  .segmented-control button {
+    padding: 0.375rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background-color 75ms, color 75ms;
+  }
+  .segmented-control button:not(:last-child) {
+    border-right: 1px solid var(--color-border-strong);
+  }
+  /* Selected: matches both the toggle-button form (aria-pressed, used by raw
+     markup) and the radiogroup form (aria-checked, used by SegmentedToggle). */
+  .segmented-control button[aria-pressed="true"],
+  .segmented-control button[aria-checked="true"] {
+    background-color: var(--cpt-color);
+    color: #fff;
+    font-weight: 600;
+  }
+  .segmented-control button:hover:not([aria-pressed="true"]):not([aria-checked="true"]) {
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-body);
+  }
+  /* inset ring avoids clipping by overflow:hidden on the container */
+  .segmented-control button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px rgba(var(--cpt-color-rgb), 0.8);
+  }
+
+  /* Filter chips — a removable, editable tag for one active table filter.
+     Default: a neat bordered pill on the surface. Bauhaus: flat, 1px stroke,
+     monospace uppercase key with a small accent square (override below). */
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 2.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background-color: var(--color-bg-surface);
+    overflow: hidden;
+  }
+  .filter-chip-body {
+    display: inline-flex;
+    align-items: stretch;
+    height: 100%;
+    font-size: 0.875rem;
+    color: var(--color-text-body);
+  }
+  /* Key segment — the filter *type* ("Assignment Group"). Accent-tinted so the
+     chip reads apart from the neutral toolbar behind it, and so the type is
+     clearly delimited from its value (the plain segment to its right). */
+  .filter-chip-keyseg {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.5rem;
+    background-color: rgba(var(--cpt-color-rgb), 0.10);
+    border-right: 1px solid var(--color-border);
+  }
+  .filter-chip-key {
+    font-weight: 600;
+    color: var(--cpt-color-text);
+  }
+  .filter-chip-val {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.625rem;
+    transition: background-color 75ms;
+  }
+  .filter-chip-body:hover .filter-chip-val {
+    background-color: var(--color-bg-hover);
+  }
+  .filter-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 100%;
+    color: var(--color-text-muted);
+    border-left: 1px solid var(--color-border);
+    transition: background-color 75ms, color 75ms;
+  }
+  .filter-chip-x:hover {
+    background-color: var(--color-bg-hover);
+    color: var(--color-text-body);
+  }
+}
+
+@keyframes slide-over-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to   { opacity: 1; transform: translateY(0);       }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0);       }
+  to   { opacity: 0; transform: translateY(-0.5rem); }
+}
+.toast-enter { animation: toast-in  0.15s ease-out both; }
+.toast-exit  { animation: toast-out 0.15s ease-in  both; }
+@keyframes chip-enter {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.chip-enter {
+  animation: chip-enter 0.1s ease-out both;
+}
+@keyframes action-body-enter {
+  from { opacity: 0; transform: translateY(-0.375rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.action-body-enter {
+  animation: action-body-enter 0.15s ease-out both;
+}
+
+/* Skeleton.jsx used Tailwind's animate-pulse over bg-[var(--color-border)] —
+   fine under Default's light grey border token, but under Bauhaus (the
+   shipped default) --color-border is repointed to --color-stroke (#1B1C1A,
+   "primary 1px border / text"), so the whole placeholder rendered as a
+   near-black block just dimming slightly instead of reading as a shimmer.
+   --color-bg-hover is the token actually meant for a subtle fill in every
+   theme, and a moving tint band over it reads as a real sweep instead. */
+.skeleton-shimmer {
+  background-color: var(--color-bg-hover);
+  background-image: linear-gradient(
+    90deg,
+    var(--color-bg-hover) 25%,
+    color-mix(in srgb, var(--color-bg-hover) 65%, var(--color-text-body) 35%) 37%,
+    var(--color-bg-hover) 63%
+  );
+  background-size: 400% 100%;
+  background-position: 100% 0;
+  animation: skeleton-shimmer-sweep 1.5s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer-sweep {
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Bauhaus theme ────────────────────────────────────────────────────────────
+   Applied when data-theme="bauhaus" is present (set by theme-init.js +
+   applyPalette() — the shipped default; see design_docs/10 § Themes). Re-points
+   the semantic/structural tokens from :root at the Bauhaus token block above,
+   the same way html.dark below overrides them for dark mode. Only covers the
+   shared component layer (.btn, .input, .card, .segmented-control) — raw
+   Tailwind utility classes used directly in a tool's own JSX (rounded-lg,
+   shadow-sm, etc.) don't read these tokens and need that tool's own rebuild
+   (canvas-power-tools-1yr.4) to actually look like Bauhaus.
+   Dark mode × Bauhaus: html.dark (specificity 0,1,1) beats this block (0,1,0)
+   for every token both define, so dark surfaces/text win automatically. The
+   few Bauhaus-only values that don't survive on a dark page (the red as text,
+   the stroke-colored borders) get their own html.dark[data-theme="bauhaus"]
+   block at the end of the dark-mode section. Rules below must read semantic
+   tokens (--color-text-body, --color-bg-hover), never --color-stroke or
+   --color-container-inset directly — those are light-only raw values and
+   rendered near-black-on-dark before this was fixed.
+   ──────────────────────────────────────────────────────────────────────────── */
+[data-theme="bauhaus"] {
+  --color-bg-page:       var(--color-canvas-paper);
+  --color-bg-hover:      var(--color-container-inset);
+  --color-text-body:     var(--color-stroke);
+  --color-border:        var(--color-stroke);
+  --color-border-strong: var(--color-stroke);
+  --color-border-subtle: var(--color-grid-divider);
+
+  --cpt-color:      var(--color-bauhaus-red);
+  --cpt-color-dark: color-mix(in srgb, var(--color-bauhaus-red) 85%, black);
+  --cpt-color-rgb:  183, 16, 42;
+  --cpt-color-text: var(--color-bauhaus-red);
+
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+
+  --radius-control: var(--radius-sm);
+  --radius-card:    var(--radius-sm);
+}
+[data-theme="bauhaus"] .domain-accent {
+  border-top-width: 4px;
+}
+[data-theme="bauhaus"] .table-header-cell {
+  @apply font-mono uppercase tracking-wider font-bold;
+  border-right-width: 1px;
+}
+[data-theme="bauhaus"] .table-header-cell:last-child {
+  border-right-width: 0;
+}
+[data-theme="bauhaus"] .table-toolbar {
+  background-color: var(--color-bg-hover);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+[data-theme="bauhaus"] .badge-pill {
+  border-radius: var(--radius-sm);
+  border-width: 1px;
+}
+[data-theme="bauhaus"] .card-titlebar {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text-body);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+/* Bauhaus metadata treatment (design_docs/10 § Typography) — monospace,
+   uppercase secondary line on browse rows. No-op under Default (sans). */
+[data-theme="bauhaus"] .list-row-meta {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+/* Bauhaus section headers (design_docs/10 § Typography) — the reference app
+   renders every form/section label as a bold monospace stroke-colored header.
+   Theme-gated so it upgrades headers across all tools at once; no-op under
+   Default, which keeps the muted sans label. */
+[data-theme="bauhaus"] .section-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 700;
+  color: var(--color-text-body);
+}
+
+/* Filter chips under Bauhaus — flat stroke box, monospace uppercase key with a
+   red accent square, per doc 10 § Component Taxonomy (metadata tags + markers). */
+[data-theme="bauhaus"] .filter-chip {
+  border-radius: var(--radius-sm);
+}
+[data-theme="bauhaus"] .filter-chip-key {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  font-size: 0.6875rem;
+  color: var(--cpt-color-text);
+}
+
+/* ─── Dark mode ────────────────────────────────────────────────────────────────
+   Applied when html.dark class is present (set by theme-init.js + applyDarkMode).
+   These rules override Tailwind utilities via higher specificity (html.dark .class
+   beats .class) so most JSX doesn't need dark: variants.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Semantic token overrides for dark mode ──
+   Ratios are vs --color-bg-surface; every text step also clears AA (4.5) on
+   --color-bg-hover, the lightest dark fill text sits on. The previous muted
+   (#6E6E6E, 2.66 on hover) and disabled (#555, used as real text in places)
+   values were the main source of unreadable dark-mode text. */
+html.dark {
+  --color-bg-page:        #161616;
+  --color-bg-surface:     #212121;
+  --color-bg-sidebar:     #111111;
+  --color-bg-hover:       #2C2C2C;
+
+  --color-text-body:      #EDEDED;   /* 13.75 */
+  --color-text-secondary: #C4C4C4;   /*  9.23 */
+  --color-text-muted:     #A3A3A3;   /*  6.38 */
+  --color-text-disabled:  #808080;   /*  4.08 */
+
+  --color-border:         #3D3D3D;   /* decorative */
+  --color-border-subtle:  #2C2C2C;
+  --color-border-strong:  #7A7A7A;   /* control boundary, 3.7 */
+
+  --color-success:        #6FCF97;
+  --color-warning:        #FFB060;
+  --color-error:          #FF9494;
+  --color-info:           #8DBBF2;
+  /* --color-danger-fill deliberately not overridden — #C01C28 under white
+     text works on either background. */
+
+  /* Accent as foreground — light enough to read on the dark surfaces. The
+     accent *fill* (--cpt-color) stays dark so white labels on it still pass. */
+  --cpt-color-text:       #93ACF5;
+
+  /* Primary tints are used as panel fills (onboarding) — the light-mode
+     values are near-white and turned those panels into white-on-white. */
+  --primary-50:           #1C2440;
+  --primary-200:          #34488A;
+}
+
+html.dark body { background-color: var(--color-bg-page); color: var(--color-text-body); }
+
+/* Native selects */
+html.dark select {
+  background-color: var(--color-bg-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-body);
+  color-scheme: dark;
+}
+/* .input selects use appearance:none + custom SVG — override arrow to light color */
+html.dark select.input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+html.dark select option { background-color: var(--color-bg-surface); }
+
+/* Custom component classes — .card, .btn-secondary, .input, .label now use tokens and flip automatically */
+html.dark .btn-ghost { color: var(--color-text-secondary); }
+html.dark .btn-ghost:hover { background-color: var(--color-bg-hover); }
+
+/* ── Background overrides — use warm tokens wherever possible ── */
+html.dark .bg-white    { background-color: var(--color-bg-surface); }
+html.dark .bg-gray-50  { background-color: var(--color-bg-page); }
+html.dark .bg-gray-100 { background-color: var(--color-bg-hover); }
+html.dark .bg-gray-200 { background-color: #3A3A3A; }
+html.dark .bg-gray-300 { background-color: #4A4A4A; }
+
+/* ── Text overrides — use warm tokens wherever possible ── */
+html.dark .text-gray-900 { color: var(--color-text-body); }
+html.dark .text-gray-800 { color: var(--color-text-body); }
+html.dark .text-gray-700 { color: var(--color-text-secondary); }
+html.dark .text-gray-600 { color: var(--color-text-secondary); }
+html.dark .text-gray-500 { color: var(--color-text-muted); }
+html.dark .text-gray-400 { color: var(--color-text-disabled); }
+
+/* ── Border overrides — use warm tokens ── */
+html.dark .border-gray-50  { border-color: var(--color-bg-page); }
+html.dark .border-gray-100 { border-color: var(--color-border-subtle); }
+html.dark .border-gray-200 { border-color: var(--color-border); }
+html.dark .border-gray-300 { border-color: var(--color-border); }
+
+/* ── Divide overrides ── */
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--color-border-subtle); }
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--color-border); }
+
+/* ── Hover overrides ── */
+html.dark .hover\:bg-gray-50:hover  { background-color: var(--color-bg-hover); }
+html.dark .hover\:bg-gray-100:hover { background-color: var(--color-bg-hover); }
+html.dark .hover\:text-gray-700:hover { color: var(--color-text-body); }
+html.dark .hover\:text-gray-800:hover { color: var(--color-text-body); }
+
+/* ── Status colors ── */
+html.dark .bg-yellow-50     { background-color: rgba(78, 62, 0, 0.25); }
+html.dark .border-yellow-200 { border-color: rgba(161, 138, 0, 0.35); }
+html.dark .text-yellow-800  { color: #fde68a; }
+html.dark .text-yellow-700  { color: #fde68a; }
+
+html.dark .bg-green-50      { background-color: rgba(0, 61, 20, 0.25); }
+html.dark .border-green-200 { border-color: rgba(0, 130, 60, 0.35); }
+html.dark .text-green-700   { color: #86efac; }
+html.dark .text-green-600   { color: #86efac; }
+
+html.dark .bg-red-50        { background-color: rgba(90, 0, 0, 0.25); }
+html.dark .border-red-200   { border-color: rgba(200, 0, 0, 0.35); }
+html.dark .text-red-600     { color: #fca5a5; }
+html.dark .text-red-700     { color: #fca5a5; }
+html.dark .hover\:text-red-600:hover { color: #fca5a5; }
+html.dark .hover\:bg-red-50:hover    { background-color: rgba(90, 0, 0, 0.25); }
+
+html.dark .bg-blue-50       { background-color: rgba(0, 30, 80, 0.25); }
+html.dark .border-blue-200  { border-color: rgba(0, 80, 200, 0.35); }
+html.dark .text-blue-700    { color: #93c5fd; }
+html.dark .text-blue-600    { color: #93c5fd; }
+
+/* ── AppNav trigger and dropdown ── */
+.cpt-nav-dropdown {
+  box-shadow: var(--shadow-md);
+}
+.cpt-nav-trigger {
+  background-color: rgba(var(--cpt-color-rgb), 0.1);
+  color: var(--cpt-color);
+}
+/* In dark mode, brand color text fails contrast for most palette colors.
+   Use near-white text on a more opaque brand tint instead (~15:1 contrast ratio). */
+html.dark .cpt-nav-trigger {
+  background-color: rgba(var(--cpt-color-rgb), 0.25);
+  color: var(--color-text-body);
+}
+html.dark .cpt-nav-dropdown {
+  border-color: var(--color-border);
+}
+
+/* ── Bauhaus × dark ──
+   Restores the Bauhaus look on a dark page: crisp high-contrast borders
+   (the light palette's are near-black --color-stroke, which html.dark has
+   already swapped for a barely-visible grey) and a light red for foreground
+   accent use — Bauhaus Red itself is 2.3:1 as text on these surfaces, though
+   it stays the fill color behind white labels. */
+html.dark[data-theme="bauhaus"] {
+  --color-border:         #7A7A7A;
+  --color-border-strong:  #7A7A7A;
+  --color-border-subtle:  #3D3D3D;
+  --cpt-color-text:       #FF8A95;
+}
+
+/* ── Scrollbar (Webkit) ── */
+html.dark ::-webkit-scrollbar { width: 6px; height: 6px; }
+html.dark ::-webkit-scrollbar-track { background: var(--color-bg-page); }
+html.dark ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }

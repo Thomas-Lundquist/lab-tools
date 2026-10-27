@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+.playwright-mcp/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# Local Claude Code launcher (work laptop, no PATH access)
+claude.exe
+
+# QTI export dev fixtures
+qti-fixture*.zip
+*-qti.zip
