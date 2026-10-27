@@ -15,18 +15,22 @@ npm run dev       # vite dev server, port 5175
 npm run build     # production build to dist/
 npm run preview   # preview the production build
 npm run lint      # eslint src — see "Tailwind token guard" below before treating failures as bugs
-npm run test      # node --test "src/**/*.test.js"
+npm run test      # node --test "src/**/*.test.js" "api/**/*.test.js"
 ```
 
 Run a single test file directly: `node --test src/pages/labs/scoring.test.js`
 
-**Running it:** `npm run dev` and open `http://localhost:5175/`, or `npm run build` and serve `dist/` from any static host over HTTPS. No install/reload step — it's just a web page.
+**Running it:** `npm run dev` and open `http://localhost:5175/`. Production is deployed on Vercel (not GitHub Pages — see below for why), which builds and serves both the static site and the `api/canvas` proxy function together; a plain `npm run build` + static-host serve of `dist/` alone will load the UI but every Canvas API call will fail, since there's nothing there to run the proxy.
 
-## Why this fork exists, and the one open risk
+## Why this fork exists, and the CORS proxy
 
 The extension's `chrome.*` surface turned out to be almost entirely shell plumbing (navigation between pages, key-value storage) with zero coupling to the Canvas page itself — no content script, no DOM injection, no session-cookie reliance. Every Canvas call already went through `fetch` with `Authorization: Bearer <token>` in `api/request.js`. That made this port mechanical rather than a rewrite. See the original repo's conversation history for the full audit.
 
-**The one thing that isn't guaranteed to work:** the extension's `host_permissions` let its `fetch` calls bypass CORS entirely — a browser-level exemption tied to the extension's identity, not anything Canvas does differently. A plain web page gets no such exemption; its cross-origin `fetch` calls are enforced by the browser against whatever `Access-Control-Allow-Origin` (and preflight `Access-Control-Allow-Headers`/`-Methods`, since `Authorization` triggers a preflight) Canvas's response actually sends back. If Granite's Canvas instance doesn't allow this page's origin, API calls will fail in the browser console with a CORS error even though the exact same request works fine from the extension. If that happens, the fix is a dumb pass-through proxy (forward request, forward response, log nothing, persist nothing) — not a redesign of this app — but that reintroduces a server component that sees student data in transit, which the extension version never had. Don't build that proxy speculatively; only if a real CORS failure shows up.
+**The one thing that wasn't guaranteed to work, and didn't:** the extension's `host_permissions` let its `fetch` calls bypass CORS entirely — a browser-level exemption tied to the extension's identity, not anything Canvas does differently. A plain web page gets no such exemption. The first deploy (GitHub Pages) confirmed Granite's Canvas instance sends no `Access-Control-Allow-Origin` header at all — and it's not an admin-configurable setting on Instructure-hosted Canvas, only on self-hosted instances, so there was no district-side fix to ask for. Every Canvas call failed with a CORS error in the browser console, starting with onboarding's token verification.
+
+The fix: `api/canvas/[...path].js`, a dumb pass-through serverless function — forwards the request to Canvas server-to-server (CORS is a browser-only restriction, so it doesn't apply there), relays the response back byte-for-byte, logs nothing, persists nothing, and forwards whatever bearer token the caller supplies rather than holding its own credential. It also rewrites Canvas's `Link` pagination header to point back through the proxy, since `canvasGetAll` (`src/api/request.js`) follows that URL directly and would otherwise bypass the proxy — and hit the same CORS wall — on page 2 onward. The proxy's destination host is restricted to an allowlist (`ALLOWED_CANVAS_HOSTS` env var, defaults to `graniteschools.instructure.com`) so it can't be turned into an open relay to arbitrary hosts by a crafted `X-Canvas-Base` header.
+
+This does reintroduce a server component that sees the Canvas token and response bodies in transit, which the extension version never had — accepted deliberately once the CORS failure was confirmed real, not spent on speculatively. It's also why hosting moved from GitHub Pages (static-only, can't run the proxy) to Vercel, which serves the static build and the `api/` serverless function from the same deployment and domain — so the frontend's calls to `/api/canvas/*` are same-origin, no CORS headers needed on that hop either.
 
 ## Architecture
 
@@ -50,15 +54,15 @@ The extension had a `chrome.storage.sync`-backed tier (cross-device) mirrored in
 
 `security` (`security/pin.js`) and `auditLog` (`security/audit-log.js`) are local-only, same as before — just `localStorage` instead of `chrome.storage.local`.
 
-The Canvas API token is still AES-GCM encrypted (`storage/encryption.js`) with a per-browser key that never leaves `localStorage`. `getDecryptedToken()` is the only way to get a usable token, and `api/request.js` calls it immediately before every fetch — never hold a decrypted token in component state. **This matters more here than it did in the extension:** an extension's storage is isolated from arbitrary page scripts by the browser; `localStorage` on a web origin is readable by any script that runs on that origin. No third-party scripts, no CDN-hosted dependencies, no analytics — ship a strict CSP (`script-src 'self'`, no `unsafe-inline`/`unsafe-eval`) once this is actually deployed somewhere.
+The Canvas API token is still AES-GCM encrypted (`storage/encryption.js`) with a per-browser key that never leaves `localStorage`. `getDecryptedToken()` is the only way to get a usable token, and `api/request.js` calls it immediately before every fetch — never hold a decrypted token in component state. **This matters more here than it did in the extension:** an extension's storage is isolated from arbitrary page scripts by the browser; `localStorage` on a web origin is readable by any script that runs on that origin. No third-party scripts, no CDN-hosted dependencies, no analytics — still worth shipping a strict CSP (`script-src 'self'`, no `unsafe-inline`/`unsafe-eval`) now that this is actually deployed; not done yet.
 
-### Canvas API layer — unchanged
+### Canvas API layer — now routed through a proxy
 
-Every Canvas call goes through `src/api/request.js` (`canvasGet` / `canvasGetAll` / `canvasPost` / `canvasPut` / `canvasDelete`): auth headers, pagination (`canvasGetAll` follows the `Link` response header), and rate-limit backoff (a 403 with `X-Rate-Limit-Remaining` pauses subsequent requests) all live there — feature code never touches `fetch` directly. None of this changed in the port; it was already extension-agnostic.
+Every Canvas call still goes through `src/api/request.js` (`canvasGet` / `canvasGetAll` / `canvasPost` / `canvasPut` / `canvasDelete`): auth headers, pagination (`canvasGetAll` follows the `Link` response header), and rate-limit backoff (a 403 with `X-Rate-Limit-Remaining` pauses subsequent requests) all live there — feature code never touches `fetch` directly. What changed in the port: requests now target `/api/canvas/*` (same-origin) instead of the Canvas domain directly, with an `X-Canvas-Base` header telling `api/canvas/[...path].js` which Canvas instance to forward to — see "Why this fork exists, and the CORS proxy" above. `src/api/auth.js`'s `verifyToken` goes through the same proxy.
 
 Each `api/*.js` module maps Canvas's raw snake_case JSON to a camelCase internal shape before returning it (see `assignments.js`'s `mapAssignment` / `buildPayload` pair for the pattern) — components never see raw Canvas JSON.
 
-Errors are typed (`api/errors.js`): `AuthError` (401), `NotFoundError` (404), `RateLimitError` (403, carries backoff ms), `ApiError` (everything else). Callers pattern-match on error type, not HTTP status. A CORS failure shows up differently from these — as a browser-level network error with no response object at all, not a typed `ApiError` — so don't expect `api/errors.js` to catch it.
+Errors are typed (`api/errors.js`): `AuthError` (401), `NotFoundError` (404), `RateLimitError` (403, carries backoff ms), `ApiError` (everything else). Callers pattern-match on error type, not HTTP status. The proxy turns an unreachable Canvas into a 502 (also not one of these types) rather than the raw browser-level CORS/network error the direct-fetch version used to produce — still not something `api/errors.js` catches, so don't expect it to.
 
 ### PIN gate / write protection — unchanged
 
