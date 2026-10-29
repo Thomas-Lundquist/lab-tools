@@ -13,8 +13,7 @@ import { getCourseSetup } from '../../storage/setup.js'
 import SetupBootstrapModal from './SetupBootstrapModal.jsx'
 import CourseSettingsModal from './CourseSettingsModal.jsx'
 import ProfessionalismPanel from './ProfessionalismPanel.jsx'
-import AttendancePanel from './AttendancePanel.jsx'
-import ScorePanel from './ScorePanel.jsx'
+import KitchenScorePanel from './KitchenScorePanel.jsx'
 import ScoringPanel from './ScoringPanel.jsx'
 
 // Left-to-right order matches the dependency order: a Professionalism
@@ -23,12 +22,30 @@ import ScoringPanel from './ScoringPanel.jsx'
 // there's anything to roll up in Scoring. Course-level
 // setup (Enable + Professionalism group, plus everything else) isn't a tab
 // at all — see SetupBootstrapModal / CourseSettingsModal below.
+// Attendance and Score used to be two tabs that each re-selected the lab and
+// section. They collapsed into one period-centric "Lab" screen (present/absent +
+// kitchen grading in one pass), so the teacher picks a lab once and flows
+// create -> grade across periods without reselecting. See DECISIONS.md.
 const TABS = [
   { id: 'labs', label: 'Professionalism' },
-  { id: 'attendance', label: 'Attendance' },
-  { id: 'score', label: 'Score' },
+  { id: 'lab', label: 'Lab' },
   { id: 'scoring', label: 'Rollup' },
 ]
+
+// The working lab + period, remembered per course so a refresh or the iPad keeps
+// the teacher in place. Selection is sticky; grading drafts live in labGrading.
+const CTX_KEY = 'labWorkingContext'
+function loadCtx(courseId) {
+  try { return (JSON.parse(localStorage.getItem(CTX_KEY) || '{}')[courseId]) ?? {} }
+  catch { return {} }
+}
+function saveCtx(courseId, ctx) {
+  try {
+    const all = JSON.parse(localStorage.getItem(CTX_KEY) || '{}')
+    all[courseId] = ctx
+    localStorage.setItem(CTX_KEY, JSON.stringify(all))
+  } catch { /* localStorage unavailable — selection just won't persist */ }
+}
 
 export default function App({ initialCourseId }) {
   const { showPanel, setShowPanel } = useKeyboardShortcuts([])
@@ -42,6 +59,36 @@ export default function App({ initialCourseId }) {
   const [showBootstrap, setShowBootstrap]   = useState(false)
   const [showCourseSettings, setShowCourseSettings] = useState(false)
   const routedCourseId = useRef(null)
+
+  // Working context: the lab + period being graded, lifted here so the Lab tab
+  // keeps it across tab switches and page loads.
+  const [labId, setLabId]         = useState(null)
+  const [sectionId, setSectionId] = useState('')
+
+  // Restore the remembered lab/period when the course changes…
+  useEffect(() => {
+    if (!courseId) { setLabId(null); setSectionId(''); return }
+    const ctx = loadCtx(courseId)
+    setLabId(ctx.labId ?? null)
+    setSectionId(ctx.sectionId ?? '')
+  }, [courseId])
+
+  // …and persist it whenever it changes.
+  useEffect(() => {
+    if (courseId) saveCtx(courseId, { labId, sectionId })
+  }, [courseId, labId, sectionId])
+
+  function selectLabPeriod(nextLabId, nextSectionId) {
+    setLabId(nextLabId || null)
+    setSectionId(nextSectionId || '')
+  }
+
+  // Creating a lab drops the teacher straight into grading it.
+  function handleLabCreated(newLabId) {
+    setLabId(newLabId)
+    setSectionId('')
+    setTab('lab')
+  }
 
   useEffect(() => {
     Promise.all([getCourses(), getPreferences()])
@@ -124,27 +171,21 @@ export default function App({ initialCourseId }) {
                 ready={ready}
                 setupVersion={setupVersion}
                 onChanged={refreshSetup}
+                onLabCreated={handleLabCreated}
                 onGoToSetup={() => setShowBootstrap(true)}
               />
             </TabPanel>
-            <TabPanel tabId="attendance" activeTab={tab}>
-              <AttendancePanel
+            <TabPanel tabId="lab" activeTab={tab}>
+              <KitchenScorePanel
                 courseId={courseId}
                 courseName={course?.name}
                 loadingCourse={loadingCourses}
                 ready={ready}
                 setupVersion={setupVersion}
-                onGoToSetup={() => setShowBootstrap(true)}
-                onGoToLabs={() => setTab('labs')}
-              />
-            </TabPanel>
-            <TabPanel tabId="score" activeTab={tab}>
-              <ScorePanel
-                courseId={courseId}
-                courseName={course?.name}
-                loadingCourse={loadingCourses}
-                ready={ready}
-                setupVersion={setupVersion}
+                labId={labId}
+                sectionId={sectionId}
+                onSelect={selectLabPeriod}
+                onChanged={refreshSetup}
                 onGoToSetup={() => setShowBootstrap(true)}
                 onGoToLabs={() => setTab('labs')}
               />

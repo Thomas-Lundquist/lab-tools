@@ -8,6 +8,13 @@
 // caller sends — it never holds its own Canvas credential — and it never
 // logs or persists request or response bodies.
 //
+// INVARIANT (see DECISIONS.md "Standing invariant — privacy"): this function
+// must stay stateless — no logging of bodies/tokens, no persistence, no
+// analytics, no stored credential. It is the one server component that sees the
+// token and grades in transit; keeping it dumb is the product's core privacy
+// promise. api/canvas.privacy.test.js fails the build if console/storage calls
+// creep in, so this does not break quietly.
+//
 // This is a single named function (not api/canvas/[...path].js) because
 // Vercel's catch-all [...param] filesystem routing is a Next.js-only
 // convention and silently 404s on a plain Vite project. vercel.json rewrites

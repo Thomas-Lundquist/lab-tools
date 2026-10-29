@@ -324,7 +324,7 @@ function EntryGroup({ title, entries, assignments, modules, courseId, sections, 
   )
 }
 
-export default function ProfessionalismPanel({ courseId, courseName, loadingCourse, ready, setupVersion, onChanged, onGoToSetup }) {
+export default function ProfessionalismPanel({ courseId, courseName, loadingCourse, ready, setupVersion, onChanged, onLabCreated, onGoToSetup }) {
   const toast = useToast()
   const [loading, setLoading]         = useState(false)
   const [sections, setSections]       = useState([])
@@ -535,6 +535,8 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       toast(standalone ? `${verb} as a standalone` : `${verb} and paired it with its journal`, 'success')
       resetCreateForm()
       onChanged?.()
+      // Hand the new lab to the Lab tab so the teacher flows straight into grading.
+      onLabCreated?.(entry.id)
     } catch (err) {
       toast(`Could not create the ${standalone ? 'standalone' : 'pairing'}: ${err.message}`, 'error')
     } finally {

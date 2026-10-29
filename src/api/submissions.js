@@ -12,10 +12,10 @@ export async function getAssignmentsWithGradingData(courseId) {
 
 // Returns individual submissions for one assignment — per-student detail view.
 // Future: grade entry, submission review, at-risk flagging.
-export async function getAssignmentSubmissions(courseId, assignmentId) {
+export async function getAssignmentSubmissions(courseId, assignmentId, { includeComments = false } = {}) {
   const subs = await canvasGetAll(
     `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions`,
-    { include: ['user'], student_ids: ['all'] },
+    { include: includeComments ? ['user', 'submission_comments'] : ['user'], student_ids: ['all'] },
   )
   return subs.map(mapSubmission)
 }
@@ -85,5 +85,8 @@ function mapSubmission(raw) {
     late:          raw.late    ?? false,
     missing:       raw.missing ?? false,
     excused:       raw.excused ?? false,
+    // Present only when requested with include[]=submission_comments. The comment
+    // bodies already on the submission — used to avoid re-posting an identical one.
+    comments:      raw.submission_comments ? raw.submission_comments.map(c => c.comment) : [],
   }
 }
