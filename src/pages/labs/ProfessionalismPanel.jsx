@@ -344,11 +344,11 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [creating, setCreating]       = useState(false)
   const touchedDueSections   = useRef(new Set())
 
-  // Link-existing form state
-  const [linkAssignmentId, setLinkAssignmentId] = useState('')
-  const [linkModuleId, setLinkModuleId]         = useState('')
-  const [linkJournalId, setLinkJournalId]       = useState('')
-  const [linking, setLinking]                   = useState(false)
+  // Link-existing: search the course's professionalism assignments and link one
+  // (with an optional Module for rollup) straight into grading.
+  const [linkSearch, setLinkSearch]         = useState('')
+  const [linkModuleById, setLinkModuleById] = useState({})
+  const [linkingId, setLinkingId]           = useState(null)
 
   useEffect(() => {
     if (!courseId) { setSections([]); setAssignments([]); setModules([]); setEntries([]); setCourseSetup(null); return }
@@ -544,29 +544,28 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     }
   }
 
-  async function handleLink() {
-    const assignment = assignments.find(a => a.id === linkAssignmentId)
-    if (!assignment) { toast('Choose a Professionalism assignment to link.', 'warning'); return }
-    setLinking(true)
+  async function handleLink(assignment, moduleId) {
+    setLinkingId(assignment.id)
     try {
-      if (linkModuleId) await addModuleItem(courseId, linkModuleId, assignment.id)
+      if (moduleId) await addModuleItem(courseId, moduleId, assignment.id)
       const entry = await saveLab({
         courseId,
-        moduleId: linkModuleId || null,
+        moduleId: moduleId || null,
         name: assignment.name,
         professionalismAssignmentId: assignment.id,
-        journalAssignmentId: linkJournalId || null,
+        journalAssignmentId: null,
         dates: {},
         closeDates: {},
       })
       setEntries(prev => [...prev, entry])
-      toast(linkJournalId ? `Linked "${assignment.name}" as a pairing` : `Linked "${assignment.name}" as a standalone`, 'success')
-      setLinkAssignmentId(''); setLinkModuleId(''); setLinkJournalId('')
+      toast(`Linked "${assignment.name}" — opening it for grading`, 'success')
       onChanged?.()
+      // Drop straight into grading the linked assignment, same as a created one.
+      onLabCreated?.(entry.id)
     } catch (err) {
       toast(`Could not link "${assignment.name}": ${err.message}`, 'error')
     } finally {
-      setLinking(false)
+      setLinkingId(null)
     }
   }
 
@@ -595,6 +594,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
 
   const trackedProfessionalismAssignmentIds = new Set(entries.map(e => e.professionalismAssignmentId))
   const linkableProfessionalismAssignments = assignments.filter(a => isProfessionalismAssignment(a.name) && !trackedProfessionalismAssignmentIds.has(a.id))
+  const linkMatches = linkableProfessionalismAssignments.filter(a => a.name.toLowerCase().includes(linkSearch.trim().toLowerCase()))
 
   // Candidates for the "journal" link: any assignment not already used as a
   // journal elsewhere, and not itself a professionalism/score assignment.
@@ -708,39 +708,51 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         </Button>
       </Card>
 
-      <details>
-        <summary className="cursor-pointer text-sm font-medium text-[var(--color-text-body)] select-none">
-          Instead, link an existing Professionalism assignment
-        </summary>
-        <Card className="space-y-4 mt-3">
-          <div>
-            <FieldLabel htmlFor="linkAssignment" required>Existing professionalism assignment</FieldLabel>
-            <Select
-              id="linkAssignment"
-              value={linkAssignmentId}
-              onChange={setLinkAssignmentId}
-              options={[{ value: '', label: 'Select a Professionalism assignment' }, ...linkableProfessionalismAssignments.map(a => ({ value: a.id, label: a.name }))]}
-            />
+      <Card className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--color-text-body)]">Link an existing Professionalism assignment</h2>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+            Grade a professionalism assignment you already made in Canvas. Search by name, pick a Module if you
+            want it in a Unit rollup, then Link — it opens in the Lab tab for grading.
+          </p>
+        </div>
+
+        <TextField
+          value={linkSearch}
+          onChange={setLinkSearch}
+          placeholder="Search professionalism assignments"
+          aria-label="Search professionalism assignments"
+          className="max-w-sm"
+        />
+
+        {linkableProfessionalismAssignments.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Every professionalism assignment in this course is already linked, or none exist yet.
+          </p>
+        ) : linkMatches.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)]">No assignment matches &ldquo;{linkSearch}&rdquo;.</p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto divide-y divide-[var(--color-border-subtle)] rounded-[var(--radius-card)] border border-[var(--color-border)]">
+            {linkMatches.map(a => (
+              <div key={a.id} className="flex items-center justify-between gap-3 px-3 py-2 flex-wrap">
+                <span className="text-sm text-[var(--color-text-body)] flex-1 min-w-[12rem] truncate" title={a.name}>{a.name}</span>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={linkModuleById[a.id] ?? ''}
+                    onChange={v => setLinkModuleById(prev => ({ ...prev, [a.id]: v }))}
+                    aria-label={`Module for ${a.name}`}
+                    className="w-40"
+                    options={[{ value: '', label: 'No module' }, ...modules.map(m => ({ value: m.id, label: m.name }))]}
+                  />
+                  <Button size="sm" icon={Link2} onClick={() => handleLink(a, linkModuleById[a.id] ?? '')} disabled={linkingId === a.id}>
+                    {linkingId === a.id ? 'Linking…' : 'Link'}
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
-          <div>
-            <FieldLabel htmlFor="linkModule">Module</FieldLabel>
-            <ModulePicker id="linkModule" modules={modules} value={linkModuleId} onChange={setLinkModuleId} />
-          </div>
-          <div>
-            <FieldLabel htmlFor="linkJournal">Journal</FieldLabel>
-            <JournalSelect
-              id="linkJournal"
-              value={linkJournalId}
-              onChange={setLinkJournalId}
-              labOptions={labJournalOptions}
-              otherOptions={otherJournalOptions}
-            />
-          </div>
-          <Button icon={Link2} onClick={handleLink} disabled={linking}>
-            {linking ? 'Linking…' : 'Link'}
-          </Button>
-        </Card>
-      </details>
+        )}
+      </Card>
     </div>
   )
 }
