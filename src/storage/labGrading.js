@@ -4,16 +4,21 @@
 // instead of leaving stale numbers behind. It keeps only Canvas student IDs, no
 // names, matching the repo's "no student data cached" posture (see CLAUDE.md).
 //
+// Two slots per lab/section so the reopen flow is unambiguous:
+//   - `committed`: the flag set as of the last successful push to Canvas. This is
+//     what a threshold change recomputes against, and what "discard" reverts to.
+//   - `draft`:     unsaved working edits. Its presence IS "there is saved work";
+//     that triggers the resume/discard prompt on reopen.
+//
 // Shape (localStorage key 'labGrading'):
 //   labGrading[labId][sectionId] = {
-//     kitchens: { [kitchenNo]: { flagIds: [kitchenFlagId...], exceeded: bool } },
-//     students: { [studentId]: { kitchen: kitchenNo|null, flagIds: [individualFlagId...], present: bool } },
-//     updatedAt:   isoString | null,  // last local edit (autosave)
-//     committedAt: isoString | null,  // last successful push to Canvas
+//     committed:   { kitchens, students } | null,
+//     committedAt: isoString | null,
+//     draft:       { kitchens, students } | null,
+//     updatedAt:   isoString | null,   // last draft edit (for the "from <time>" prompt)
 //   }
-//
-// "Unsaved draft" means updatedAt is newer than committedAt — that is what
-// triggers the "there is saved work — resume or discard?" prompt on reopen.
+// A section object: { kitchens: { [kitchenNo]: { flagIds, exceeded } },
+//                     students: { [studentId]: { kitchen, flagIds, present } } }
 
 import { kvGet, kvSet } from './kv.js'
 import { countKitchenSeverities } from '../config/labFlags.js'
@@ -22,7 +27,11 @@ import { kitchenScore, studentScore, ABSENT_SCORE } from '../pages/labs/kitchenS
 const STORAGE_KEY = 'labGrading'
 
 export function emptySection() {
-  return { kitchens: {}, students: {}, updatedAt: null, committedAt: null }
+  return { kitchens: {}, students: {} }
+}
+
+export function emptyState() {
+  return { committed: null, committedAt: null, draft: null, updatedAt: null }
 }
 
 // ---- persistence (thin localStorage read-modify-write) ----
@@ -31,32 +40,35 @@ async function readAll() {
   return (await kvGet(STORAGE_KEY)) ?? {}
 }
 
-async function putSection(labId, sectionId, section) {
+async function putState(labId, sectionId, state) {
   const all = await readAll()
-  all[labId] = { ...(all[labId] ?? {}), [sectionId]: section }
+  all[labId] = { ...(all[labId] ?? {}), [sectionId]: state }
   await kvSet(STORAGE_KEY, all)
-  return section
+  return state
 }
 
 export async function getLabGrading(labId, sectionId) {
   const all = await readAll()
-  return all?.[labId]?.[sectionId] ?? emptySection()
+  return all?.[labId]?.[sectionId] ?? emptyState()
 }
 
-// Autosave the working state. Stamps updatedAt (not committedAt), so the section
-// now reads as an unsaved draft until the next commit.
-export async function saveDraft(labId, sectionId, { kitchens, students }) {
+// Autosave the working edits as a draft. Leaves `committed` untouched.
+export async function saveDraft(labId, sectionId, section) {
   const prev = await getLabGrading(labId, sectionId)
-  const section = { ...prev, kitchens, students, updatedAt: new Date().toISOString() }
-  return putSection(labId, sectionId, section)
+  return putState(labId, sectionId, { ...prev, draft: section, updatedAt: new Date().toISOString() })
 }
 
-// Record a successful push. Stamps committedAt (and updatedAt to match), so the
-// section reads as saved — no resume prompt — until the teacher edits again.
-export async function commitLabGrading(labId, sectionId, { kitchens, students }) {
+// Record a successful push: the working section becomes the committed set and the
+// draft is cleared, so the section reads as saved until the next edit.
+export async function commitLabGrading(labId, sectionId, section) {
   const now = new Date().toISOString()
-  const section = { kitchens, students, updatedAt: now, committedAt: now }
-  return putSection(labId, sectionId, section)
+  return putState(labId, sectionId, { committed: section, committedAt: now, draft: null, updatedAt: now })
+}
+
+// Drop the draft, keeping the last committed set (what "discard" does).
+export async function discardDraft(labId, sectionId) {
+  const prev = await getLabGrading(labId, sectionId)
+  return putState(labId, sectionId, { ...prev, draft: null })
 }
 
 export async function clearLabGrading(labId, sectionId) {
@@ -74,12 +86,15 @@ export async function hasUnsavedDraft(labId, sectionId) {
 
 // ---- pure logic (no storage; unit-tested) ----
 
-// True when there is local work newer than the last push. ISO timestamps sort
-// lexicographically in time order, so this is a plain string compare.
-export function isUnsavedDraft(section) {
-  if (!section?.updatedAt) return false
-  if (!section.committedAt) return true
-  return section.updatedAt > section.committedAt
+// An unsaved draft exists whenever a draft slot is populated.
+export function isUnsavedDraft(state) {
+  return !!state?.draft
+}
+
+// The section the screen should show by default: the draft if one exists, else
+// the last committed set, else an empty section.
+export function activeSection(state) {
+  return state?.draft ?? state?.committed ?? emptySection()
 }
 
 // One student's live score, derived from the stored flags. Absent short-circuits

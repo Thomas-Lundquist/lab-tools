@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  emptySection, isUnsavedDraft, deriveStudentScore, deriveSectionScores,
+  emptyState, isUnsavedDraft, activeSection, deriveStudentScore, deriveSectionScores,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent,
 } from './labGrading.js'
 
@@ -18,8 +18,6 @@ function sampleSection() {
       s2: { kitchen: 1, flagIds: [], present: false },           // absent -> 0
       s3: { kitchen: 2, flagIds: [], present: true },            // exceeded kitchen -> 4
     },
-    updatedAt: null,
-    committedAt: null,
   }
 }
 
@@ -45,26 +43,26 @@ test('deriveSectionScores returns every student', () => {
   assert.deepEqual(deriveSectionScores(sampleSection()), { s1: 1, s2: 0, s3: 4 })
 })
 
-// --- isUnsavedDraft ---
+// --- isUnsavedDraft / activeSection (two-slot: committed vs draft) ---
 
-test('fresh empty section is not an unsaved draft', () => {
-  assert.equal(isUnsavedDraft(emptySection()), false)
+test('fresh empty state is not an unsaved draft', () => {
+  assert.equal(isUnsavedDraft(emptyState()), false)
 })
 
-test('edited-but-never-committed is an unsaved draft', () => {
-  assert.equal(isUnsavedDraft({ updatedAt: '2026-10-28T10:00:00.000Z', committedAt: null }), true)
+test('a populated draft slot is an unsaved draft', () => {
+  assert.equal(isUnsavedDraft({ committed: null, draft: { kitchens: {}, students: {} } }), true)
 })
 
-test('committed with no later edit is NOT a draft', () => {
-  const t = '2026-10-28T10:00:00.000Z'
-  assert.equal(isUnsavedDraft({ updatedAt: t, committedAt: t }), false)
+test('committed with no draft is NOT a draft', () => {
+  assert.equal(isUnsavedDraft({ committed: { kitchens: {}, students: {} }, committedAt: 't', draft: null }), false)
 })
 
-test('edit after a commit is an unsaved draft', () => {
-  assert.equal(isUnsavedDraft({
-    updatedAt: '2026-10-28T10:05:00.000Z',
-    committedAt: '2026-10-28T10:00:00.000Z',
-  }), true)
+test('activeSection prefers the draft, then committed, then empty', () => {
+  const committed = { kitchens: { 1: { flagIds: [], exceeded: true } }, students: {} }
+  const draft = { kitchens: { 1: { flagIds: ['floor-not-swept'], exceeded: false } }, students: {} }
+  assert.equal(activeSection({ draft, committed }), draft)
+  assert.equal(activeSection({ draft: null, committed }), committed)
+  assert.deepEqual(activeSection(emptyState()), { kitchens: {}, students: {} })
 })
 
 // --- pure transforms: moving a student between kitchens (absence swap) ---
