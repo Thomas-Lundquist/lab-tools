@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader, AlertTriangle } from 'lucide-react'
+import { Loader, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Select from '../../components/Select.jsx'
@@ -361,7 +361,7 @@ export default function KitchenScorePanel({
             </Card>
           )}
 
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p className="text-xs text-[var(--color-text-muted)]">
               Edits autosave on this device. Nothing posts to Canvas until you commit.
             </p>
@@ -403,17 +403,29 @@ export default function KitchenScorePanel({
   )
 }
 
-// One compact student line: name · score · present · exceeds · kitchen · add-flag
-// · comment, all inline (wraps only when narrow). Selected individual flags drop
-// to a second line ONLY when present, so an unflagged student is a single row.
+// One student line. On md+ it is a single inline row. On phone it collapses to a
+// tappable summary (name · score · Present) with a flag-count hint; the chevron
+// expands the controls, so a long roster stays clean until a student needs edits.
+// The controls live in a display:contents wrapper so they lay out inline in the
+// row on md+ (md:contents) and only hide on a collapsed phone — no duplicate markup.
 function StudentRow({ student, section, score, kitchenCount, onApply }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
   const availableFlags = INDIVIDUAL_FLAGS.filter(f => !st.flagIds.includes(f.id))
+  const [open, setOpen] = useState(false)
   return (
-    <div className="py-1.5 space-y-1">
+    <div className="py-2 md:py-1.5 space-y-1.5 md:space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="w-36 shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate" title={student.userName}>{student.userName}</span>
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          aria-expanded={open}
+          aria-label={open ? 'Collapse student' : 'Expand student'}
+          className="md:hidden shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-body)]"
+        >
+          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        <span className="shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate max-w-[8rem] md:max-w-none md:w-36" title={student.userName}>{student.userName}</span>
         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
@@ -421,46 +433,54 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           onClick={() => onApply(setPresent(section, student.userId, absent))}>
           {absent ? 'Absent' : 'Present'}
         </Button>
-        {!absent && (
-          <Chip tone="exceeded" active={!!st.exceeded}
-            onClick={() => onApply(setStudentExceeded(section, student.userId, !st.exceeded))}
-            title="Mark this student as exceeding expectations (4)">Exceeds</Chip>
+        {/* Collapsed-on-phone hint that flags exist underneath. */}
+        {!open && !absent && st.flagIds.length > 0 && (
+          <span className="md:hidden text-xs font-medium text-[var(--color-info)]">{st.flagIds.length} flag{st.flagIds.length === 1 ? '' : 's'}</span>
         )}
-        {absent && (
-          <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
-            <input type="checkbox" checked={!!st.excused}
-              onChange={() => onApply({ ...section, students: { ...section.students, [student.userId]: { ...st, excused: !st.excused } } })} />
-            Excused
-          </label>
-        )}
-        <Select
-          value={st.kitchen == null ? '' : String(st.kitchen)}
-          onChange={v => onApply(setStudentKitchen(section, student.userId, v === '' ? null : Number(v)))}
-          className="w-28"
-          options={[
-            { value: '', label: 'No kitchen' },
-            ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
-          ]}
-        />
-        {!absent && (
+        {/* Controls — inline on md+, collapsible on phone. display:contents lets the
+            children join the row's flex layout directly, so there is one markup. */}
+        <div className={`${open ? 'contents' : 'hidden'} md:contents`}>
+          {!absent && (
+            <Chip tone="exceeded" active={!!st.exceeded}
+              onClick={() => onApply(setStudentExceeded(section, student.userId, !st.exceeded))}
+              title="Mark this student as exceeding expectations (4)">Exceeds</Chip>
+          )}
+          {absent && (
+            <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+              <input type="checkbox" checked={!!st.excused}
+                onChange={() => onApply({ ...section, students: { ...section.students, [student.userId]: { ...st, excused: !st.excused } } })} />
+              Excused
+            </label>
+          )}
           <Select
-            value=""
-            onChange={id => { if (id) onApply(toggleStudentFlag(section, student.userId, id)) }}
-            className="w-40"
-            options={[{ value: '', label: 'Add flag…' }, ...availableFlags.map(f => ({ value: f.id, label: f.label }))]}
+            value={st.kitchen == null ? '' : String(st.kitchen)}
+            onChange={v => onApply(setStudentKitchen(section, student.userId, v === '' ? null : Number(v)))}
+            className="w-24 shrink-0"
+            options={[
+              { value: '', label: 'No kitchen' },
+              ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
+            ]}
           />
-        )}
-        <input
-          type="text"
-          value={st.comment ?? ''}
-          onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
-          placeholder="Comment (optional)"
-          aria-label={`Comment for ${student.userName}`}
-          className="flex-1 min-w-[9rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
-        />
+          {!absent && (
+            <Select
+              value=""
+              onChange={id => { if (id) onApply(toggleStudentFlag(section, student.userId, id)) }}
+              className="w-full md:w-56"
+              options={[{ value: '', label: 'Add flag…' }, ...availableFlags.map(f => ({ value: f.id, label: f.label }))]}
+            />
+          )}
+          <input
+            type="text"
+            value={st.comment ?? ''}
+            onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
+            placeholder="Comment (optional)"
+            aria-label={`Comment for ${student.userName}`}
+            className="w-full md:flex-1 md:min-w-[14rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
+          />
+        </div>
       </div>
       {!absent && st.flagIds.length > 0 && (
-        <div className="flex flex-wrap gap-1 pl-36">
+        <div className={`${open ? 'flex' : 'hidden'} md:flex flex-wrap gap-1 md:pl-36`}>
           {st.flagIds.map(id => (
             <Chip key={id} tone="individual" active onClick={() => onApply(toggleStudentFlag(section, student.userId, id))} title="Remove">
               {FLAG_BY_ID[id]?.label ?? id} ✕
@@ -482,7 +502,7 @@ function FlagPicker({ label, options, selectedIds, toneFor, onToggle }) {
       <Select
         value=""
         onChange={id => { if (id) onToggle(id) }}
-        className="w-64"
+        className="w-full sm:w-72"
         options={[{ value: '', label }, ...available.map(o => ({ value: o.id, label: o.label }))]}
       />
       {selectedIds.length > 0 && (
