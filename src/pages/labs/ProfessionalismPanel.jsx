@@ -422,9 +422,15 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       toast('The title needs the word "Professionalism" so Scoring can find it.', 'warning')
       return
     }
-    if (!courseSetup?.professionalismGroupId) { toast('Set up the Professionalism assignment group first.', 'warning'); return }
+    // Re-read setup straight from storage instead of trusting the courseSetup
+    // state snapshot. Tagging a section writes localStorage synchronously, but
+    // the state copy only updates once its network refetch lands — so a Create
+    // fired right after tagging would otherwise filter against a stale tag set
+    // and reach just one section. See DECISIONS.md.
+    const freshSetup = await getCourseSetup(courseId)
+    if (!freshSetup?.professionalismGroupId) { toast('Set up the Professionalism assignment group first.', 'warning'); return }
     const scoped = scope !== 'all'
-    const targetSections = sectionsInScope(sections, courseSetup, scope)
+    const targetSections = sectionsInScope(sections, freshSetup, scope)
     if (scoped && targetSections.length === 0) {
       toast(`No sections are tagged ${scope}-day. Tag one in Course Settings, or choose All sections.`, 'warning')
       return
@@ -440,9 +446,9 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         pointsPossible: 4,
         gradingType: 'points',
         submissionTypes: ['none'],
-        assignmentGroupId: courseSetup.professionalismGroupId,
+        assignmentGroupId: freshSetup.professionalismGroupId,
         published: true,
-        postToSis: courseSetup.settings.syncLabsToFocus,
+        postToSis: freshSetup.settings.syncLabsToFocus,
         // A scoped assignment is hidden from everyone; the per-section overrides
         // below are what reveal it to the chosen day's sections.
         onlyVisibleToOverrides: scoped,
@@ -457,8 +463,8 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
 
       if (moduleId) await addModuleItem(courseId, moduleId, assignment.id)
 
-      const journalDueOffset   = courseSetup.settings.journalDueOffsetDays ?? 1
-      const journalCloseOffset = courseSetup.settings.labCloseDateOffsetDays ?? 14
+      const journalDueOffset   = freshSetup.settings.journalDueOffsetDays ?? 1
+      const journalCloseOffset = freshSetup.settings.labCloseDateOffsetDays ?? 14
 
       // Retrying after a partial failure (or reusing an existing assignment)
       // can mean a section already has an override here — Canvas rejects a
@@ -475,9 +481,19 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       // date, due and close offset from settings). A scoped create still writes
       // a professionalism override for a dateless section, because that override
       // is what grants the section visibility; the journal write needs a date.
+      // Each section's lab date: prefer the form's per-section value, then fall
+      // back to the day-type quick-set date. The fallback matters on a create
+      // fired right after tagging — sectionDueDates is prefilled by a
+      // courseSetup-state effect that may not have run yet for a just-tagged
+      // section, but freshSetup already knows that section's day type and the
+      // A/B date fields hold the date the teacher typed. resolvedDates feeds the
+      // saved lab record so it matches the overrides actually written.
+      const resolvedDates = { ...sectionDueDates }
       for (const sec of targetSections) {
-        const labDate = sectionDueDates[sec.id]
+        const dayType = freshSetup.sections?.[sec.id]?.dayType
+        const labDate = sectionDueDates[sec.id] || (dayType === 'A' ? aDate : dayType === 'B' ? bDate : '')
         if (!scoped && !labDate) continue
+        if (labDate) resolvedDates[sec.id] = labDate
         const profFields = {
           courseSectionId: sec.id,
           ...(labDate ? professionalismOverrideDates(labDate) : {}),
@@ -510,7 +526,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         name: name.trim(),
         professionalismAssignmentId: assignment.id,
         journalAssignmentId: standalone ? null : journalId,
-        dates: sectionDueDates,
+        dates: resolvedDates,
         closeDates: {},
       })
 
