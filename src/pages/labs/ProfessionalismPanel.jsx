@@ -380,13 +380,26 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   useEffect(() => {
     if (!courseId) { setSections([]); setAssignments([]); setModules([]); setEntries([]); setCourseSetup(null); return }
     setLoading(true)
-    // This tab reads only assignment names/ids (dup check + link list), module_ids
-    // (link autofill), overrides (the scope badge), and published (journal list) —
-    // never assignment_group, so it is left out to shrink the payload.
-    Promise.all([getSections(courseId), getAssignments(courseId, { include: ['module_ids', 'overrides'] }), getModules(courseId), getLabs(courseId), getCourseSetup(courseId)])
-      .then(([secs, asns, mods, l, s]) => {
+    // This tab only cares about two kinds of assignment: lab journals (title has
+    // "lab") and professionalism scores (title has "professionalism"). Fetch just
+    // those two scoped sets server-side instead of every assignment in the course,
+    // then merge and dedupe by id (a "… Lab Professionalism" title matches both).
+    // include is trimmed to what the tab reads: module_ids (link autofill) and
+    // overrides (the scope badge); assignment_group and the rest are left out.
+    const opts = { include: ['module_ids', 'overrides'] }
+    Promise.all([
+      getSections(courseId),
+      getAssignments(courseId, { ...opts, searchTerm: 'lab' }),
+      getAssignments(courseId, { ...opts, searchTerm: 'professionalism' }),
+      getModules(courseId),
+      getLabs(courseId),
+      getCourseSetup(courseId),
+    ])
+      .then(([secs, labAsns, profAsns, mods, l, s]) => {
+        const byId = new Map()
+        for (const a of [...labAsns, ...profAsns]) byId.set(a.id, a)
         setSections(secs)
-        setAssignments(asns)
+        setAssignments([...byId.values()])
         setModules(mods)
         setEntries(l)
         setCourseSetup(s)

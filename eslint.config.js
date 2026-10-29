@@ -65,15 +65,17 @@ export default [
       sourceType: 'module',
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
-    // Registered so existing `// eslint-disable-line react-hooks/*` directives
-    // resolve; the rules themselves are intentionally left off for now (a real
-    // hooks-lint pass is a separate task, kept out of the token-guard signal).
     plugins: { 'react-hooks': reactHooks },
-    // With the hooks rules off, those pre-existing disable directives read as
-    // "unused" — silence that so the report shows only token violations. A
-    // proper react-hooks pass will re-enable the rules (tracked separately).
+    // reportUnusedDisableDirectives stays off: only rules-of-hooks is enabled
+    // below, so any pre-existing `// eslint-disable-line react-hooks/exhaustive-deps`
+    // directives read as "unused" and would otherwise add noise. exhaustive-deps
+    // is deliberately NOT enabled yet — a full deps pass is a separate task.
     linterOptions: { reportUnusedDisableDirectives: 'off' },
     rules: {
+      // Catches a hook called conditionally or after an early return — the class
+      // of bug that blanked the Lab tab (a useMemo below a loading guard). Build,
+      // tests, and the token guard all miss it; this is the only check that does.
+      'react-hooks/rules-of-hooks': 'error',
       'no-restricted-syntax': [
         'error',
         // Static className strings: className="… text-gray-500 …"

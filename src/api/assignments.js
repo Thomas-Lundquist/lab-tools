@@ -6,12 +6,15 @@ import { canvasGetAll, canvasGet, canvasPut, canvasPost, canvasDelete } from './
 // keeps the full set for callers that want it (e.g. the Scoring rollup).
 export async function getAssignments(
   courseId,
-  { include = ['assignment_group', 'module_ids', 'overrides'], onProgress } = {},
+  { include = ['assignment_group', 'module_ids', 'overrides'], searchTerm, onProgress } = {},
 ) {
-  const assignments = await canvasGetAll(`/api/v1/courses/${courseId}/assignments`, {
-    include,
-    order_by: 'position',
-  }, onProgress)
+  // searchTerm is Canvas's case-insensitive substring match on the title. Passing
+  // one scopes the fetch server-side to just the matching assignments — far fewer
+  // pages than pulling the whole course when a screen only cares about, say, "lab"
+  // or "professionalism" titles. An unknown/empty term is simply omitted.
+  const params = { include, order_by: 'position' }
+  if (searchTerm) params.search_term = searchTerm
+  const assignments = await canvasGetAll(`/api/v1/courses/${courseId}/assignments`, params, onProgress)
   return assignments.map(mapAssignment)
 }
 
