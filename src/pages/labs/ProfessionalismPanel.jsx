@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Link2, BookOpen } from 'lucide-react'
+import { Plus, Link2, BookOpen, AlertTriangle } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
+import Modal from '../../components/Modal.jsx'
 import TextField from '../../components/TextField.jsx'
 import Select from '../../components/Select.jsx'
 import FieldLabel from '../../components/FieldLabel.jsx'
@@ -11,7 +12,7 @@ import { useToast } from '../../components/Toast.jsx'
 import { getSections } from '../../api/sections.js'
 import { getAssignments, createAssignment } from '../../api/assignments.js'
 import { createOverride, updateOverride, getOverrides } from '../../api/overrides.js'
-import { getModules, addModuleItem } from '../../api/modules.js'
+import { getModules, ensureModuleItem } from '../../api/modules.js'
 import { getCourseSetup, getLabs, saveLab, isStandalone } from '../../storage/setup.js'
 import { isProfessionalismAssignment } from './scoring.js'
 
@@ -36,6 +37,28 @@ const SCOPE_OPTIONS = [
 function sectionsInScope(sections, courseSetup, scope) {
   if (scope === 'all') return sections
   return sections.filter(sec => courseSetup?.sections?.[sec.id]?.dayType === scope)
+}
+
+// Normalize a title before comparing two of them. Trim + lowercase mirrors the
+// comparison Scoring already uses to find a lab's assignment by name, so what
+// this treats as "the same" matches what Scoring will later reconcile.
+//
+// This is the one tuning knob for duplicate detection. If you title the same
+// lab inconsistently — "Lab 3 — Professionalism" one week, "Lab 3
+// Professionalism" the next — widen this (e.g. strip punctuation and collapse
+// whitespace) so both still count as a collision.
+function normalizeTitle(title) {
+  return title.trim().toLowerCase()
+}
+
+// Every assignment already in the course whose title collides with `title`.
+// Canvas permits identical titles and does nothing to stop a second copy, so
+// this is what makes "create the same lab twice" detectable. Returns all
+// matches — tracked by this tool or made by hand in Canvas — so the confirm
+// modal can report how many exist and offer one to reuse.
+export function findDuplicateAssignments(title, assignments) {
+  const target = normalizeTitle(title)
+  return assignments.filter(a => normalizeTitle(a.name) === target)
 }
 
 // ISO for the end (23:59) and start (00:00) of a YYYY-MM-DD date string, in the
@@ -342,6 +365,10 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [bDate, setBDateRaw]          = useState('')
   const [sectionDueDates, setSectionDueDates]     = useState({})
   const [creating, setCreating]       = useState(false)
+  // Non-null while the duplicate-title warning is open. Holds the validated
+  // create context plus the colliding assignments, so the modal's buttons can
+  // drive performCreate without re-validating. See handleCreate.
+  const [dupPrompt, setDupPrompt]     = useState(null)
   const touchedDueSections   = useRef(new Set())
 
   // Link-existing: search the course's professionalism assignments and link one
@@ -435,12 +462,29 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       toast(`No sections are tagged ${scope}-day. Tag one in Course Settings, or choose All sections.`, 'warning')
       return
     }
+    const expectedTitle = name.trim()
+    const ctx = { expectedTitle, freshSetup, standalone, scoped, targetSections }
+
+    // Protect against making the same lab's assignment twice. If any assignment
+    // already carries this title, stop and let the teacher decide: reuse it,
+    // make a second copy on purpose, or cancel. Resolved in the modal below.
+    const duplicates = findDuplicateAssignments(expectedTitle, assignments)
+    if (duplicates.length > 0) {
+      setDupPrompt({ ctx, matches: duplicates })
+      return
+    }
+    await performCreate(ctx, null)
+  }
+
+  // The actual Canvas create. `reuseTarget` is an existing assignment to attach
+  // to (picked in the duplicate modal) or null to make a new one. Split out from
+  // handleCreate so both "Reuse existing" and "Create anyway" share one path with
+  // the already-validated context.
+  async function performCreate(ctx, reuseTarget) {
+    const { expectedTitle, freshSetup, standalone, scoped, targetSections } = ctx
     setCreating(true)
     try {
-      const expectedTitle = name.trim()
-      const existing = assignments.find(a =>
-        a.name.trim().toLowerCase() === expectedTitle.toLowerCase() && !trackedProfessionalismAssignmentIds.has(a.id),
-      )
+      const existing = reuseTarget
       const assignment = existing ?? await createAssignment(courseId, {
         name: expectedTitle,
         pointsPossible: 4,
@@ -461,7 +505,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       // reusing the one that already exists.
       if (!existing) setAssignments(prev => [...prev, assignment])
 
-      if (moduleId) await addModuleItem(courseId, moduleId, assignment.id)
+      if (moduleId) await ensureModuleItem(courseId, moduleId, assignment.id)
 
       const journalDueOffset   = freshSetup.settings.journalDueOffsetDays ?? 1
       const journalCloseOffset = freshSetup.settings.labCloseDateOffsetDays ?? 14
@@ -547,7 +591,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   async function handleLink(assignment, moduleId) {
     setLinkingId(assignment.id)
     try {
-      if (moduleId) await addModuleItem(courseId, moduleId, assignment.id)
+      if (moduleId) await ensureModuleItem(courseId, moduleId, assignment.id)
       const entry = await saveLab({
         courseId,
         moduleId: moduleId || null,
@@ -707,6 +751,40 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           {creating ? 'Creating…' : standalone ? 'Create Standalone' : 'Create Pairing'}
         </Button>
       </Card>
+
+      {dupPrompt && (
+        <Modal
+          title="An assignment with this title already exists"
+          onClose={() => !creating && setDupPrompt(null)}
+          footer={<>
+            <Button variant="secondary" onClick={() => setDupPrompt(null)} disabled={creating}>Cancel</Button>
+            <Button
+              variant="secondary"
+              onClick={() => { const { ctx } = dupPrompt; setDupPrompt(null); performCreate(ctx, null) }}
+              disabled={creating}
+            >
+              Create anyway
+            </Button>
+            <Button
+              onClick={() => { const { ctx, matches } = dupPrompt; setDupPrompt(null); performCreate(ctx, matches[0]) }}
+              disabled={creating}
+            >
+              Reuse existing
+            </Button>
+          </>}
+        >
+          <div className="text-sm text-[var(--color-text-secondary)] space-y-2">
+            <p className="flex items-start gap-1.5 text-[var(--color-warning)]">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              {dupPrompt.matches.length === 1
+                ? <>&ldquo;{dupPrompt.matches[0].name}&rdquo; already exists in this course.</>
+                : <>{dupPrompt.matches.length} assignments titled &ldquo;{dupPrompt.ctx.expectedTitle}&rdquo; already exist in this course.</>}
+            </p>
+            <p><strong>Reuse existing</strong> grades the lab on the assignment already there — the usual choice when you meant the same lab.</p>
+            <p><strong>Create anyway</strong> makes a second copy with the same title. Scoring finds professionalism assignments by name, so two copies will collide there.</p>
+          </div>
+        </Modal>
+      )}
 
       <Card className="space-y-4">
         <div>
