@@ -72,6 +72,21 @@ function RollupSection({
   const rows = scored ? scored.results.map((r, i) => ({ student: students[i], r })) : []
   const visibleRows = section ? rows.filter(x => x.student.sectionName === section) : rows
 
+  // Unit guard: a unit score must not post until every lab in the unit is graded.
+  // "Not in yet" = a lab with no grades at all — detected as a lab for which no
+  // student has a non-null score. Checking per-student blanks instead would
+  // false-positive, because a student outside a section-scoped lab still has a
+  // blank submission row. Term rollups have no such precondition.
+  const incompleteLabs = useMemo(() => {
+    if (label !== 'Unit' || !scored) return []
+    return scored.labs
+      .filter(lab => !students.some(st => {
+        const sub = submissionsByStudent[st.userId]?.[lab.id]
+        return sub && sub.score != null
+      }))
+      .map(l => l.name)
+  }, [label, scored, students, submissionsByStudent])
+
   const summary = useMemo(() => {
     if (!scored) return ''
     const zeros = rows.filter(x => x.r.zero).length
@@ -134,6 +149,10 @@ function RollupSection({
   }
 
   function openConfirm() {
+    if (incompleteLabs.length) {
+      toast(`Grade every lab in ${active} first. Not graded yet: ${incompleteLabs.join(', ')}.`, 'warning')
+      return
+    }
     const count = rows.filter(x => x.r.value !== null).length
     setConfirm({ message: `Push ${count} computed score${count === 1 ? '' : 's'} to "${title}" (out of 4)? This changes real grades in Canvas.` })
   }
@@ -189,8 +208,14 @@ function RollupSection({
           <div className="space-y-4">
             <p className="text-sm text-[var(--color-text-muted)]">{summary}</p>
 
+            {incompleteLabs.length > 0 && (
+              <Callout tone="warning">
+                Not graded yet: {incompleteLabs.join(', ')}. Grade every lab in {active} before pushing the unit score.
+              </Callout>
+            )}
+
             <div className="flex items-center gap-3">
-              <Button icon={Send} onClick={openConfirm} disabled={!rows.length}>Push Grades to Canvas</Button>
+              <Button icon={Send} onClick={openConfirm} disabled={!rows.length || incompleteLabs.length > 0}>Push Grades to Canvas</Button>
               <Button variant="secondary" icon={Copy} onClick={() => setShowCopy(s => !s)}>
                 {showCopy ? 'Hide spreadsheet column' : 'Copy as spreadsheet column instead'}
               </Button>

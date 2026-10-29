@@ -54,7 +54,7 @@ The extension had a `chrome.storage.sync`-backed tier (cross-device) mirrored in
 
 `security` (`security/pin.js`) and `auditLog` (`security/audit-log.js`) are local-only, same as before — just `localStorage` instead of `chrome.storage.local`.
 
-The Canvas API token is still AES-GCM encrypted (`storage/encryption.js`) with a per-browser key that never leaves `localStorage`. `getDecryptedToken()` is the only way to get a usable token, and `api/request.js` calls it immediately before every fetch — never hold a decrypted token in component state. **This matters more here than it did in the extension:** an extension's storage is isolated from arbitrary page scripts by the browser; `localStorage` on a web origin is readable by any script that runs on that origin. No third-party scripts, no CDN-hosted dependencies, no analytics — still worth shipping a strict CSP (`script-src 'self'`, no `unsafe-inline`/`unsafe-eval`) now that this is actually deployed; not done yet.
+The Canvas API token is still AES-GCM encrypted (`storage/encryption.js`) with a per-browser key that never leaves `localStorage`. `getDecryptedToken()` is the only way to get a usable token, and `api/request.js` calls it immediately before every fetch — never hold a decrypted token in component state. **This matters more here than it did in the extension:** an extension's storage is isolated from arbitrary page scripts by the browser; `localStorage` on a web origin is readable by any script that runs on that origin. No third-party scripts, no CDN-hosted dependencies, no analytics — still worth shipping a strict CSP (`script-src 'self'`, no `unsafe-inline`/`unsafe-eval`) now that this is actually deployed; not done yet. The overall data-handling promise (gradebook data stays local and goes only to Canvas; nothing persisted server-side; no analytics; the proxy stays dumb) is written up as a standing invariant in `DECISIONS.md` — "Standing invariant — privacy" — and enforced by `api/canvas.privacy.test.js`. Do not erode it without a deliberate, documented decision.
 
 ### Canvas API layer — now routed through a proxy
 
@@ -78,7 +78,10 @@ The only lint rule configured is a `no-restricted-syntax` guard that fails on ra
 
 ### Tool page structure — Labs, Attendance & Professionalism (`src/pages/labs/`)
 
-Unchanged from the extension — see the original repo's `CLAUDE.md` for the full breakdown of tabs, the Pairing/Standalone vocabulary, Unit/Term rollup, and `scoring.js`. None of that logic touched `chrome.*` and none of it changed here.
+The Pairing/Standalone vocabulary and the Unit/Term rollup (`scoring.js`) carry over from the extension — see the original repo's `CLAUDE.md` for those. Two things changed in the web app (see `DECISIONS.md`, 2026-10-28):
+
+- **Flag-based lab scoring replaced the deduction model.** The old per-lab score came from `scoreFromDeductions` (start at 4, subtract per mark), which could not cap criticals and gave every clean kitchen a 4. The current model is threshold-based: `kitchenScore`/`studentScore` in `kitchenScoring.js`, driven by flags declared in `config/labFlags.js`. The stored truth is **flags, not scores** (`storage/labGrading.js`, keyed lab→section, with a committed slot and a draft slot), so a later threshold change recomputes old labs. Scores are always derived via `deriveStudentScore`; absent is a separate 0, never computed. `scoreFromDeductions` and the old `ScorePanel`/`AttendancePanel` files remain in the tree but are no longer wired into the tabs.
+- **The Attendance and Score tabs collapsed into one period-centric "Lab" tab** (`KitchenScorePanel.jsx`). `App.jsx` lifts the working lab + period (persisted per course), so the teacher picks a lab once and flows create→grade across periods. Attendance (present/absent) and grading live on one screen; edits autosave a local draft and nothing posts to Canvas until a PIN-gated **Commit Period** (warn-but-allow). Reopening a period with an unsaved draft shows a resume/discard prompt. The Unit rollup in `ScoringPanel.jsx` hard-refuses a push until every lab in the unit has grades.
 
 ## Related projects
 

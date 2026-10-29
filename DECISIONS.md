@@ -4,6 +4,21 @@ A running log of product and design decisions settled in conversation — not a 
 
 ---
 
+## Standing invariant — privacy (do not break without a deliberate decision)
+
+**2026-10-28 — Gradebook data lives only in the browser and goes only to Canvas; nothing is persisted server-side, and there is no analytics.**
+This is the product's core promise, stated here so a future change cannot erode it quietly. Specifically:
+- Roster and scores are never cached locally — they are re-derived live from Canvas on every view (see `ScorePanel`/`AttendancePanel`/`KitchenScorePanel`). The only grading state stored in the browser is the per-lab **flags** (not scores) in `storage/labGrading.js`, keyed by Canvas student id with no names.
+- The Canvas token is AES-GCM encrypted (`storage/encryption.js`) under a per-browser key that never leaves `localStorage`. There is no export/sync — each device re-enters its own token (see the iPad note below).
+- The Vercel proxy (`api/canvas.js`) is a dumb pass-through: it forwards the caller's token, holds no credential of its own, and logs/persists nothing. `api/canvas.privacy.test.js` fails the build if a `console.*` or disk write creeps into the proxy.
+- No analytics, telemetry, third-party scripts, or CDN-hosted assets ship in the app.
+Changing any of these (a real backend, cross-device sync, server-side logging) changes the data-handling model and must be a deliberate, documented decision — not a side effect.
+
+**2026-10-28 — iPad: the token is re-entered per device, not transferred.**
+Grading happens from an iPad because the laptop is tethered to the podium. The Vercel site makes that possible (the old extension could not), but the per-browser encryption key never leaves its device, so there is no secure transfer path and none is built. The teacher runs onboarding on the iPad once and pastes a Canvas token there. An encrypted export/import was considered and declined as more surface and risk than re-entry is worth.
+
+---
+
 ## The port itself
 
 **2026-10-27 — Forked as a static web-app port; confirmed the extension had no Canvas-DOM or cookie coupling to begin with.**
