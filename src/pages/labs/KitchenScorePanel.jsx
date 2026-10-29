@@ -203,6 +203,12 @@ export default function KitchenScorePanel({
     )
   }
 
+  // Reference-stable comment library (an inline `?? []` mints a new array each
+  // render and re-renders every memoized StudentRow). MUST stay above the early
+  // returns below — a hook called after a conditional return changes the per-render
+  // hook count and crashes the component (this is what blanked the Lab tab).
+  const commentLibrary = useMemo(() => courseSetup?.settings?.commentLibrary ?? [], [courseSetup])
+
   // --- gating / empty states ---
   if (loading || loadingCourse) {
     return <div className="space-y-3"><Skeleton height="4rem" /><Skeleton height="16rem" /></div>
@@ -240,9 +246,6 @@ export default function KitchenScorePanel({
   const maxScore = courseSetup?.settings?.maxScore ?? 4
   const scores = deriveSectionScores(section, maxScore)
   const commentsOn = !!courseSetup?.settings?.sendDeductionReasonsAsComment
-  // Memoized so its reference is stable across keystrokes — an inline `?? []`
-  // would mint a new array each render and re-render every memoized row.
-  const commentLibrary = useMemo(() => courseSetup?.settings?.commentLibrary ?? [], [courseSetup])
   const presentUnassigned = roster.filter(s => {
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null

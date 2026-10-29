@@ -1,8 +1,15 @@
 import { canvasGetAll, canvasGet, canvasPut, canvasPost, canvasDelete } from './request.js'
 
-export async function getAssignments(courseId, onProgress) {
+// `include` is caller-controlled so a screen only pays for what it reads. Each
+// include costs Canvas extra server-side work and payload — `overrides` most of
+// all, since Canvas gathers every assignment's section overrides. The default
+// keeps the full set for callers that want it (e.g. the Scoring rollup).
+export async function getAssignments(
+  courseId,
+  { include = ['assignment_group', 'module_ids', 'overrides'], onProgress } = {},
+) {
   const assignments = await canvasGetAll(`/api/v1/courses/${courseId}/assignments`, {
-    include: ['assignment_group', 'module_ids', 'overrides'],
+    include,
     order_by: 'position',
   }, onProgress)
   return assignments.map(mapAssignment)

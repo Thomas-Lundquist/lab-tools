@@ -380,7 +380,10 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   useEffect(() => {
     if (!courseId) { setSections([]); setAssignments([]); setModules([]); setEntries([]); setCourseSetup(null); return }
     setLoading(true)
-    Promise.all([getSections(courseId), getAssignments(courseId), getModules(courseId), getLabs(courseId), getCourseSetup(courseId)])
+    // This tab reads only assignment names/ids (dup check + link list), module_ids
+    // (link autofill), overrides (the scope badge), and published (journal list) —
+    // never assignment_group, so it is left out to shrink the payload.
+    Promise.all([getSections(courseId), getAssignments(courseId, { include: ['module_ids', 'overrides'] }), getModules(courseId), getLabs(courseId), getCourseSetup(courseId)])
       .then(([secs, asns, mods, l, s]) => {
         setSections(secs)
         setAssignments(asns)
