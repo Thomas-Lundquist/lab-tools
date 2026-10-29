@@ -446,7 +446,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           <Select
             value=""
             onChange={id => { if (id) onApply(toggleStudentFlag(section, student.userId, id)) }}
-            className="w-40"
+            className="w-56"
             options={[{ value: '', label: 'Add flag…' }, ...availableFlags.map(f => ({ value: f.id, label: f.label }))]}
           />
         )}
@@ -456,7 +456,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
           placeholder="Comment (optional)"
           aria-label={`Comment for ${student.userName}`}
-          className="flex-1 min-w-[9rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
+          className="flex-1 min-w-[14rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
         />
       </div>
       {!absent && st.flagIds.length > 0 && (
@@ -482,7 +482,7 @@ function FlagPicker({ label, options, selectedIds, toneFor, onToggle }) {
       <Select
         value=""
         onChange={id => { if (id) onToggle(id) }}
-        className="w-64"
+        className="w-72"
         options={[{ value: '', label }, ...available.map(o => ({ value: o.id, label: o.label }))]}
       />
       {selectedIds.length > 0 && (
