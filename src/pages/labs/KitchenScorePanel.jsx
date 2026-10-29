@@ -164,6 +164,12 @@ export default function KitchenScorePanel({
             zeroJournalWhenAbsent: courseSetup.settings.zeroJournalWhenAbsent,
             userName: s.userName,
           })
+          // A free-text note on an absent student still posts (timely feedback),
+          // deduped like the present path. Absent students carry no flag summary.
+          const note = buildComment(section, s.userId, 0, commentsOn)
+          if (note && !(profComments[s.userId] ?? []).includes(note)) {
+            await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, { text_comment: note })
+          }
         } else {
           const value = deriveStudentScore(section, s.userId)
           const fields = { posted_grade: String(value) }
@@ -397,14 +403,17 @@ export default function KitchenScorePanel({
   )
 }
 
-// One student line: name, score, present/absent, kitchen picker, individual flags.
+// One compact student line: name · score · present · exceeds · kitchen · add-flag
+// · comment, all inline (wraps only when narrow). Selected individual flags drop
+// to a second line ONLY when present, so an unflagged student is a single row.
 function StudentRow({ student, section, score, kitchenCount, onApply }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
+  const availableFlags = INDIVIDUAL_FLAGS.filter(f => !st.flagIds.includes(f.id))
   return (
-    <div className="py-2 space-y-1.5">
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="w-40 shrink-0 text-sm font-medium text-[var(--color-text-body)]">{student.userName}</span>
+    <div className="py-1.5 space-y-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="w-36 shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate" title={student.userName}>{student.userName}</span>
         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
@@ -415,9 +424,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
         {!absent && (
           <Chip tone="exceeded" active={!!st.exceeded}
             onClick={() => onApply(setStudentExceeded(section, student.userId, !st.exceeded))}
-            title="Mark this student as exceeding expectations (4)">
-            Exceeded (4)
-          </Chip>
+            title="Mark this student as exceeding expectations (4)">Exceeds</Chip>
         )}
         {absent && (
           <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -429,30 +436,36 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
         <Select
           value={st.kitchen == null ? '' : String(st.kitchen)}
           onChange={v => onApply(setStudentKitchen(section, student.userId, v === '' ? null : Number(v)))}
-          className="w-32"
+          className="w-28"
           options={[
             { value: '', label: 'No kitchen' },
-            ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `Kitchen ${i + 1}` })),
+            ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
           ]}
         />
+        {!absent && (
+          <Select
+            value=""
+            onChange={id => { if (id) onApply(toggleStudentFlag(section, student.userId, id)) }}
+            className="w-40"
+            options={[{ value: '', label: 'Add flag…' }, ...availableFlags.map(f => ({ value: f.id, label: f.label }))]}
+          />
+        )}
+        <input
+          type="text"
+          value={st.comment ?? ''}
+          onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
+          placeholder="Comment (optional)"
+          aria-label={`Comment for ${student.userName}`}
+          className="flex-1 min-w-[9rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
+        />
       </div>
-      {!absent && (
-        <div className="pl-40 space-y-1.5">
-          <FlagPicker
-            label="Add individual flag…"
-            options={INDIVIDUAL_FLAGS}
-            selectedIds={st.flagIds}
-            toneFor={() => 'individual'}
-            onToggle={id => onApply(toggleStudentFlag(section, student.userId, id))}
-          />
-          <input
-            type="text"
-            value={st.comment ?? ''}
-            onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
-            placeholder="Comment to student (optional)"
-            aria-label={`Comment for ${student.userName}`}
-            className="w-full max-w-md text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
-          />
+      {!absent && st.flagIds.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-36">
+          {st.flagIds.map(id => (
+            <Chip key={id} tone="individual" active onClick={() => onApply(toggleStudentFlag(section, student.userId, id))} title="Remove">
+              {FLAG_BY_ID[id]?.label ?? id} ✕
+            </Chip>
+          ))}
         </div>
       )}
     </div>
