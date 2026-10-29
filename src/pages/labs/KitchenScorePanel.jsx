@@ -361,7 +361,7 @@ export default function KitchenScorePanel({
             </Card>
           )}
 
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p className="text-xs text-[var(--color-text-muted)]">
               Edits autosave on this device. Nothing posts to Canvas until you commit.
             </p>
@@ -411,9 +411,9 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
   const absent = st.present === false
   const availableFlags = INDIVIDUAL_FLAGS.filter(f => !st.flagIds.includes(f.id))
   return (
-    <div className="py-1.5 space-y-1">
+    <div className="py-2 md:py-1.5 space-y-1.5 md:space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="w-36 shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate" title={student.userName}>{student.userName}</span>
+        <span className="shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate max-w-[8rem] md:max-w-none md:w-36" title={student.userName}>{student.userName}</span>
         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
@@ -436,7 +436,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
         <Select
           value={st.kitchen == null ? '' : String(st.kitchen)}
           onChange={v => onApply(setStudentKitchen(section, student.userId, v === '' ? null : Number(v)))}
-          className="w-28"
+          className="w-24 shrink-0"
           options={[
             { value: '', label: 'No kitchen' },
             ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
@@ -446,7 +446,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           <Select
             value=""
             onChange={id => { if (id) onApply(toggleStudentFlag(section, student.userId, id)) }}
-            className="w-56"
+            className="w-full md:w-56"
             options={[{ value: '', label: 'Add flag…' }, ...availableFlags.map(f => ({ value: f.id, label: f.label }))]}
           />
         )}
@@ -456,11 +456,11 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
           placeholder="Comment (optional)"
           aria-label={`Comment for ${student.userName}`}
-          className="flex-1 min-w-[14rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
+          className="w-full md:flex-1 md:min-w-[14rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
         />
       </div>
       {!absent && st.flagIds.length > 0 && (
-        <div className="flex flex-wrap gap-1 pl-36">
+        <div className="flex flex-wrap gap-1 md:pl-36">
           {st.flagIds.map(id => (
             <Chip key={id} tone="individual" active onClick={() => onApply(toggleStudentFlag(section, student.userId, id))} title="Remove">
               {FLAG_BY_ID[id]?.label ?? id} ✕
@@ -482,7 +482,7 @@ function FlagPicker({ label, options, selectedIds, toneFor, onToggle }) {
       <Select
         value=""
         onChange={id => { if (id) onToggle(id) }}
-        className="w-72"
+        className="w-full sm:w-72"
         options={[{ value: '', label }, ...available.map(o => ({ value: o.id, label: o.label }))]}
       />
       {selectedIds.length > 0 && (
