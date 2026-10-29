@@ -13,6 +13,7 @@ import Callout from '../components/Callout.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import { ToastProvider, useToast } from '../components/Toast.jsx'
 import SetupGuard from '../components/SetupGuard.jsx'
+import DeviceLinkExport from '../components/DeviceLinkExport.jsx'
 import { verifyToken } from '../api/auth.js'
 import { getCourses } from '../api/courses.js'
 import { getAccount, saveAccount } from '../storage/account.js'
@@ -328,6 +329,7 @@ function App() {
             <AppearanceSection />
             <CoursesSection />
             <SecuritySection />
+            <DeviceLinkExport />
             <DangerZone />
           </div>
         </div>

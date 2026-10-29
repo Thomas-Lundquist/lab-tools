@@ -17,6 +17,9 @@ Changing any of these (a real backend, cross-device sync, server-side logging) c
 **2026-10-28 — iPad: the token is re-entered per device, not transferred.**
 Grading happens from an iPad because the laptop is tethered to the podium. The Vercel site makes that possible (the old extension could not), but the per-browser encryption key never leaves its device, so there is no secure transfer path and none is built. The teacher runs onboarding on the iPad once and pastes a Canvas token there. An encrypted export/import was considered and declined as more surface and risk than re-entry is worth.
 
+**2026-10-29 — Reversed the above: added a QR device-link transfer, because grading moved to multiple devices (phone + iPad). Still no server.**
+The teacher wanted to sign in on several devices without re-entering the token each time. A real backend (accounts) was explored and set aside: a Canvas developer key for OAuth is not available to a personal tool, and a plain backend would put the token server-side — against the privacy invariant above. A zero-knowledge account was the secure alternative, but the teacher chose the lighter **device-link**: `storage/deviceLink.js` packs the Canvas login (and the `setup` blob if it fits a scannable QR, else login-only) into a QR, encrypted with a passphrase via PBKDF2 → AES-GCM. The passphrase is never shown, transmitted, or stored, so a photo of the QR is useless without it; nothing touches a server, so the privacy invariant holds. The source device shows the QR (`DeviceLinkExport`, in Settings); a fresh device scans it (`DeviceLinkScanner`, on onboarding) and re-encrypts the token under its own per-browser key. Security rests on the passphrase strength — the UI asks for a real passphrase, not a PIN. Dependencies added: `qrcode` (generate) and `jsqr` (decode), both bundled (no CDN), to keep CSP `script-src 'self'` intact.
+
 ---
 
 ## The port itself

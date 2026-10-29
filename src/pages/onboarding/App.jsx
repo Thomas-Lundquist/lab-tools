@@ -4,8 +4,9 @@ import { verifyToken } from '../../api/auth.js'
 import { saveAccount, markSetupComplete } from '../../storage/account.js'
 import { setupPin } from '../../security/pin.js'
 import { pageUrl } from '../../utils/nav.js'
+import DeviceLinkScanner from '../../components/DeviceLinkScanner.jsx'
 
-const STEPS = ['welcome', 'url', 'token', 'verifying', 'pin-setup', 'success']
+const STEPS = ['welcome', 'scan', 'url', 'token', 'verifying', 'pin-setup', 'success']
 
 export default function App() {
   const [step, setStep] = useState('welcome')
@@ -78,7 +79,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[var(--primary-50)] to-[var(--color-bg-page)] flex items-center justify-center p-6">
       <div className="w-full max-w-lg">
-        {step === 'welcome' && <WelcomeScreen onStart={() => setStep('url')} />}
+        {step === 'welcome' && <WelcomeScreen onStart={() => setStep('url')} onScan={() => setStep('scan')} />}
+
+        {step === 'scan' && (
+          <DeviceLinkScanner onDone={openLabsTool} onCancel={() => setStep('welcome')} />
+        )}
 
         {step === 'url' && (
           <StepCard step={1} title="Where is your Canvas?">
@@ -285,7 +290,7 @@ export default function App() {
   )
 }
 
-function WelcomeScreen({ onStart }) {
+function WelcomeScreen({ onStart, onScan }) {
   return (
     <div className="card p-12 text-center space-y-8">
       <div>
@@ -299,9 +304,12 @@ function WelcomeScreen({ onStart }) {
         <p>Score professionalism labs by unit straight from your live gradebook, and push the results back to Canvas in one click.</p>
         <p className="font-medium text-[var(--cpt-color-text)]">Your data never leaves your browser.</p>
       </div>
-      <div>
+      <div className="space-y-3">
         <button className="btn-primary text-base px-8 py-3" onClick={onStart}>Get Started</button>
-        <p className="text-xs text-[var(--color-text-muted)] mt-3">Takes about 2 minutes</p>
+        <p className="text-xs text-[var(--color-text-muted)]">Takes about 2 minutes</p>
+        <div>
+          <button className="btn-ghost text-sm" onClick={onScan}>Already set up on another device? Scan to copy it here</button>
+        </div>
       </div>
     </div>
   )
