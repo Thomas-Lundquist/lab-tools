@@ -5,18 +5,21 @@ import {
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentExceeded,
 } from './labGrading.js'
 
-// A small section: kitchen 1 has two minor flags (-> kitchenScore 2); two
-// students, one of them absent.
+// A small section exercising every path: kitchen 1 has two minor flags
+// (-> kitchenScore 2); kitchen 2 is clean + Exceeded (-> true 4); kitchen 3 is
+// clean, not exceeded (-> the soft top / maxScore).
 function sampleSection() {
   return {
     kitchens: {
       1: { flagIds: ['floor-not-swept', 'burners-left-on'], exceeded: false }, // 2 minor -> 2
-      2: { flagIds: [], exceeded: true },                                       // clean + exceeded -> 4
+      2: { flagIds: [], exceeded: true },                                       // clean + exceeded -> true 4
+      3: { flagIds: [], exceeded: false },                                      // clean -> soft top (maxScore)
     },
     students: {
-      s1: { kitchen: 1, flagIds: ['phone-out'], present: true }, // kitchen 2 minus 1 individual -> 1
+      s1: { kitchen: 1, flagIds: ['phone-out'], present: true }, // kitchen 1 (2 minor) minus 1 individual -> 1
       s2: { kitchen: 1, flagIds: [], present: false },           // absent -> 0
-      s3: { kitchen: 2, flagIds: [], present: true },            // exceeded kitchen -> 4
+      s3: { kitchen: 2, flagIds: [], present: true },            // exceeded kitchen -> true 4
+      s4: { kitchen: 3, flagIds: [], present: true },            // clean kitchen -> soft top
     },
   }
 }
@@ -40,29 +43,34 @@ test('unknown student derives null', () => {
 })
 
 test('deriveSectionScores returns every student', () => {
-  assert.deepEqual(deriveSectionScores(sampleSection()), { s1: 1, s2: 0, s3: 4 })
+  assert.deepEqual(deriveSectionScores(sampleSection()), { s1: 1, s2: 0, s3: 4, s4: 4 })
 })
 
 // --- maxScore: cap only the top tier ---
 
-test('a top (4) posts as the configured max score', () => {
-  assert.equal(deriveStudentScore(sampleSection(), 's3', 3.6), 3.6)
+test('a clean (top) kitchen posts as the configured max score', () => {
+  assert.equal(deriveStudentScore(sampleSection(), 's4', 3.6), 3.6)
+})
+
+test('Exceeded posts a true 4, bypassing the lowered max score', () => {
+  assert.equal(deriveStudentScore(sampleSection(), 's3', 3.6), 4)
 })
 
 test('lower tiers are untouched by a lowered max score', () => {
-  assert.equal(deriveStudentScore(sampleSection(), 's1', 3.6), 1) // kitchen 2 - 1 flag -> 1
+  assert.equal(deriveStudentScore(sampleSection(), 's1', 3.6), 1) // kitchen 1 (2 minor) - 1 flag -> 1
 })
 
 test('absent stays 0 with a lowered max score', () => {
   assert.equal(deriveStudentScore(sampleSection(), 's2', 3.6), 0)
 })
 
-test('deriveSectionScores caps only the top across the section', () => {
-  assert.deepEqual(deriveSectionScores(sampleSection(), 3.6), { s1: 1, s2: 0, s3: 3.6 })
+test('deriveSectionScores caps only the soft top across the section', () => {
+  // s3 is Exceeded -> true 4 (uncapped); s4 is a clean kitchen -> soft 3.6.
+  assert.deepEqual(deriveSectionScores(sampleSection(), 3.6), { s1: 1, s2: 0, s3: 4, s4: 3.6 })
 })
 
 test('max score defaults to 4 (no change)', () => {
-  assert.equal(deriveStudentScore(sampleSection(), 's3'), 4)
+  assert.equal(deriveStudentScore(sampleSection(), 's4'), 4)
 })
 
 // --- isUnsavedDraft / activeSection (two-slot: committed vs draft) ---
@@ -104,16 +112,16 @@ test('toggling a kitchen flag updates every present student in it', () => {
   assert.equal(deriveStudentScore(section, 's3'), 2)
 })
 
-test('a single minor flag does not cancel exceeded (below the threshold)', () => {
+test('any flag cancels the exceeded upgrade (only a clean kitchen earns the true 4)', () => {
   let section = sampleSection()
-  section = toggleKitchenFlag(section, 2, 'dishes-left-unwashed') // 1 minor, below the 2-minor floor
-  assert.equal(deriveStudentScore(section, 's3'), 4) // still exceeded -> 4
+  section = toggleKitchenFlag(section, 2, 'dishes-left-unwashed') // 1 minor -> tier 3, no longer clean
+  assert.equal(deriveStudentScore(section, 's3'), 3) // the minor pulls it off the top; exceeded does not apply
 })
 
-test('clearing exceeded drops a clean kitchen from 4 to 3', () => {
+test('clearing exceeded drops a clean kitchen from the true 4 to the soft cap', () => {
   let section = sampleSection()
   section = setKitchenExceeded(section, 2, false)
-  assert.equal(deriveStudentScore(section, 's3'), 3)
+  assert.equal(deriveStudentScore(section, 's3', 3.6), 3.6) // clean, not exceeded -> maxScore
 })
 
 test('toggling an individual flag is reversible', () => {

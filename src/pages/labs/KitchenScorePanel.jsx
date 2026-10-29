@@ -14,8 +14,8 @@ import { getSections } from '../../api/sections.js'
 import { getEnrollments } from '../../api/enrollments.js'
 import { getAssignmentSubmissions, updateSubmissionGrade } from '../../api/submissions.js'
 import { getOverrides } from '../../api/overrides.js'
-import { getCourseSetup, getLabs, isStandalone } from '../../storage/setup.js'
-import { KITCHEN_FLAGS, INDIVIDUAL_FLAGS, FLAG_BY_ID } from '../../config/labFlags.js'
+import { getCourseSetup, getLabs, isStandalone, getFlags } from '../../storage/setup.js'
+import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
   getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft,
   deriveSectionScores, deriveStudentScore, emptySection,
@@ -27,7 +27,6 @@ import { commitAbsent } from './absentCommit.js'
 // exactly 0 is what an absence writes, so "currently 0" means "already absent".
 const WRITTEN_ZERO = 0
 const DEFAULT_KITCHENS = 8
-const kitchenTone = id => (FLAG_BY_ID[id]?.severity === 'critical' ? 'critical' : 'minor')
 
 // Build the working section from the roster, seeding each student from the prior
 // (committed or draft) flags and from Canvas for present/absent. A Canvas score
@@ -58,6 +57,7 @@ export default function KitchenScorePanel({
   const [entries, setEntries]         = useState([])
   const [sections, setSections]       = useState([])
   const [courseSetup, setCourseSetup] = useState(null)
+  const [flags, setFlags]             = useState(null) // global flag definitions; null -> built-in defaults
   const [profOverrides, setProfOverrides] = useState(null)
 
   const [rosterLoading, setRosterLoading] = useState(false)
@@ -80,8 +80,10 @@ export default function KitchenScorePanel({
   useEffect(() => {
     if (!courseId) { setEntries([]); setSections([]); setCourseSetup(null); return }
     setLoading(true)
-    Promise.all([getLabs(courseId), getSections(courseId), getCourseSetup(courseId)])
-      .then(([labs, secs, setup]) => { setEntries(labs); setSections(secs); setCourseSetup(setup) })
+    // getFlags is global (not course-scoped) but is cheap and lives here so the
+    // picker/scoring always see the teacher's latest edits on a course switch.
+    Promise.all([getLabs(courseId), getSections(courseId), getCourseSetup(courseId), getFlags()])
+      .then(([labs, secs, setup, f]) => { setEntries(labs); setSections(secs); setCourseSetup(setup); setFlags(f) })
       .finally(() => setLoading(false))
   }, [courseId, setupVersion])
 
@@ -170,17 +172,17 @@ export default function KitchenScorePanel({
           })
           // A free-text note on an absent student still posts (timely feedback),
           // deduped like the present path. Absent students carry no flag summary.
-          const note = buildComment(section, s.userId, 0, commentsOn)
+          const note = buildComment(section, s.userId, 0, commentsOn, byId)
           if (note && !(profComments[s.userId] ?? []).includes(note)) {
             await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, { text_comment: note })
           }
         } else {
-          const value = deriveStudentScore(section, s.userId)
+          const value = deriveStudentScore(section, s.userId, maxScore, byId)
           const fields = { posted_grade: String(value) }
           // Flag summary (gated on the course setting) plus any free-text comment,
           // as one body. Skip posting if that exact text is already on the
           // submission, so re-committing unchanged work does not duplicate it.
-          const comment = buildComment(section, s.userId, value, commentsOn)
+          const comment = buildComment(section, s.userId, value, commentsOn, byId)
           if (comment && !(profComments[s.userId] ?? []).includes(comment)) fields.text_comment = comment
           await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, fields)
         }
@@ -208,6 +210,13 @@ export default function KitchenScorePanel({
   // returns below — a hook called after a conditional return changes the per-render
   // hook count and crashes the component (this is what blanked the Lab tab).
   const commentLibrary = useMemo(() => courseSetup?.settings?.commentLibrary ?? [], [courseSetup])
+
+  // Resolved flag config: the teacher's global list (or the built-in defaults
+  // until they edit), split into the pickers' option lists plus an id->flag map
+  // for labels/severity. MUST stay above the early returns below (same reason as
+  // commentLibrary) — a hook after a conditional return blanks the component.
+  const { byId, kitchen: kitchenFlagOptions, individual: individualFlagOptions } =
+    useMemo(() => flagIndex(resolveFlags(flags)), [flags])
 
   // --- gating / empty states ---
   if (loading || loadingCourse) {
@@ -244,7 +253,8 @@ export default function KitchenScorePanel({
   const overridesLoading = !!entry && profOverrides === null
 
   const maxScore = courseSetup?.settings?.maxScore ?? 4
-  const scores = deriveSectionScores(section, maxScore)
+  const scores = deriveSectionScores(section, maxScore, byId)
+  const kitchenTone = id => (byId[id]?.severity === 'critical' ? 'critical' : 'minor')
   const commentsOn = !!courseSetup?.settings?.sendDeductionReasonsAsComment
   const presentUnassigned = roster.filter(s => {
     const st = section.students[s.userId]
@@ -337,7 +347,7 @@ export default function KitchenScorePanel({
                   <div className="space-y-1.5">
                     <FlagModalPicker
                       title={`Kitchen ${k} — add flags`}
-                      options={KITCHEN_FLAGS}
+                      options={kitchenFlagOptions}
                       selectedIds={kflags}
                       toneFor={kitchenTone}
                       onToggle={id => applySection(toggleKitchenFlag(section, k, id))}
@@ -346,7 +356,7 @@ export default function KitchenScorePanel({
                       <div className="flex flex-wrap gap-1">
                         {kflags.map(id => (
                           <Chip key={id} tone={kitchenTone(id)} active onClick={() => applySection(toggleKitchenFlag(section, k, id))} title="Remove">
-                            {FLAG_BY_ID[id]?.label ?? id} ✕
+                            {byId[id]?.label ?? id} ✕
                           </Chip>
                         ))}
                       </div>
@@ -360,7 +370,8 @@ export default function KitchenScorePanel({
                     )}
                     {members.map(s => (
                       <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore} onApply={applySection} />
+                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
+                        flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} />
                     ))}
                   </div>
                 </div>
@@ -377,7 +388,8 @@ export default function KitchenScorePanel({
               <div className="px-4 py-2 divide-y divide-[var(--color-border-subtle)]">
                 {unassigned.map(s => (
                   <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                    kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore} onApply={applySection} />
+                    kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
+                    flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} />
                 ))}
               </div>
             </Card>
@@ -430,7 +442,7 @@ export default function KitchenScorePanel({
 // expands the controls, so a long roster stays clean until a student needs edits.
 // The controls live in a display:contents wrapper so they lay out inline in the
 // row on md+ (md:contents) and only hide on a collapsed phone — no duplicate markup.
-function StudentRowBase({ student, section, score, kitchenCount, commentLibrary = [], maxScore = 4, onApply }) {
+function StudentRowBase({ student, section, score, kitchenCount, commentLibrary = [], maxScore = 4, flagsById = FLAG_BY_ID, individualFlags = [], onApply }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
   const [open, setOpen] = useState(false)
@@ -505,7 +517,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
           {!absent && (
             <FlagModalPicker
               title={`${student.userName} — add flags`}
-              options={INDIVIDUAL_FLAGS}
+              options={individualFlags}
               selectedIds={st.flagIds}
               onToggle={id => onApply(toggleStudentFlag(section, student.userId, id))}
             />
@@ -543,7 +555,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         <div className={`${open ? 'flex' : 'hidden'} md:flex flex-wrap gap-1 md:pl-36`}>
           {st.flagIds.map(id => (
             <Chip key={id} tone="individual" active onClick={() => onApply(toggleStudentFlag(section, student.userId, id))} title="Remove">
-              {FLAG_BY_ID[id]?.label ?? id} ✕
+              {flagsById[id]?.label ?? id} ✕
             </Chip>
           ))}
         </div>
@@ -593,6 +605,8 @@ function studentRowEqual(prev, next) {
     && prev.kitchenCount === next.kitchenCount
     && prev.maxScore === next.maxScore
     && prev.commentLibrary === next.commentLibrary
+    && prev.flagsById === next.flagsById
+    && prev.individualFlags === next.individualFlags
     && prev.onApply === next.onApply
     && prev.section.students[prev.student.userId] === next.section.students[next.student.userId]
 }
@@ -635,14 +649,14 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
 // One submission comment body: the flag summary (only when the course setting is
 // on) plus any free-text comment. Deterministic, so an unchanged commit produces
 // the same string and can be skipped as a duplicate.
-function buildComment(section, studentId, score, includeFlags) {
+function buildComment(section, studentId, score, includeFlags, byId = FLAG_BY_ID) {
   const st = section.students[studentId]
   if (!st) return ''
   const parts = []
   if (includeFlags) {
     const kitchen = st.kitchen != null ? section.kitchens[st.kitchen] : null
-    const kitchenLabels = (kitchen?.flagIds ?? []).map(id => FLAG_BY_ID[id]?.label).filter(Boolean)
-    const indivLabels = (st.flagIds ?? []).map(id => FLAG_BY_ID[id]?.label).filter(Boolean)
+    const kitchenLabels = (kitchen?.flagIds ?? []).map(id => byId[id]?.label).filter(Boolean)
+    const indivLabels = (st.flagIds ?? []).map(id => byId[id]?.label).filter(Boolean)
     if (st.exceeded && indivLabels.length === 0) {
       parts.push(`Professionalism: ${score}/4 — Exceeded expectations`)
     } else if (kitchenLabels.length || indivLabels.length) {

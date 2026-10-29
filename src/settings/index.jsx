@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Eye, EyeOff, CheckCircle, AlertCircle, Loader, ShieldCheck, ShieldOff, Star } from 'lucide-react'
+import { Eye, EyeOff, CheckCircle, AlertCircle, Loader, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
 import { BrandLogo } from '../components/AppNav.jsx'
 import ToolShell from '../components/ToolShell.jsx'
 import SkipLink from '../components/SkipLink.jsx'
@@ -18,6 +18,8 @@ import { verifyToken } from '../api/auth.js'
 import { getCourses } from '../api/courses.js'
 import { getAccount, saveAccount } from '../storage/account.js'
 import { getPreferences, setPreference } from '../storage/preferences.js'
+import { getFlags, saveFlags } from '../storage/setup.js'
+import { DEFAULT_FLAGS } from '../config/labFlags.js'
 import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../security/pin.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
 import { pageUrl } from '../utils/nav.js'
@@ -233,6 +235,104 @@ function CoursesSection() {
   )
 }
 
+// The teacher-editable lab flag checklist, shared across every course (stored
+// globally via storage/setup.js). The Lab tool reads this list to build its
+// flag pickers and to score: a saved lab keeps only flag ids, so renaming or
+// re-rating a flag here recomputes past labs. Kitchen flags carry a severity
+// (Minor / Major); individual flags do not (each simply drops one tier).
+function LabFlagsSection() {
+  const [flags, setFlags]     = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { getFlags().then(setFlags).finally(() => setLoading(false)) }, [])
+
+  // Persist the whole list on every edit (saveFlags is a cheap localStorage
+  // read-modify-write; the list is short and edits are infrequent).
+  async function update(next) {
+    setFlags(next)
+    await saveFlags(next)
+  }
+
+  function addFlag(scope) {
+    const flag = scope === 'kitchen'
+      ? { id: `flag_${Date.now()}`, label: 'New kitchen flag', scope: 'kitchen', severity: 'minor' }
+      : { id: `flag_${Date.now()}`, label: 'New individual flag', scope: 'individual' }
+    update([...(flags ?? []), flag])
+  }
+
+  const setLabel    = (id, label)    => update(flags.map(f => (f.id === id ? { ...f, label } : f)))
+  const setSeverity = (id, severity) => update(flags.map(f => (f.id === id ? { ...f, severity } : f)))
+  const removeFlag  = id             => update(flags.filter(f => f.id !== id))
+
+  const kitchen    = (flags ?? []).filter(f => f.scope === 'kitchen')
+  const individual = (flags ?? []).filter(f => f.scope === 'individual')
+
+  return (
+    <Card className="space-y-5">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Lab flags</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          The checklist you tap when grading a lab, shared across every course. A clean kitchen scores the top;
+          each kitchen flag lowers the score (a Major counts about twice a Minor), and each individual flag drops
+          that one student one tier. Renaming or re-rating a flag also updates labs you have already graded.
+        </p>
+      </div>
+
+      {loading || !flags ? (
+        <Skeleton height="8rem" />
+      ) : (
+        <>
+          <div className="space-y-2">
+            <FieldLabel>Kitchen flags — apply to everyone in the kitchen</FieldLabel>
+            <div className="space-y-2">
+              {kitchen.map(f => (
+                <div key={f.id} className="flex items-center gap-2">
+                  <TextField value={f.label} onChange={v => setLabel(f.id, v)} aria-label="Flag label" className="flex-1" />
+                  <div className="segmented-control shrink-0">
+                    {[['minor', 'Minor'], ['critical', 'Major']].map(([val, lbl]) => (
+                      <button key={val} aria-pressed={f.severity === val} onClick={() => setSeverity(f.id, val)}>{lbl}</button>
+                    ))}
+                  </div>
+                  <button onClick={() => removeFlag(f.id)} aria-label={`Remove ${f.label}`}
+                    className="shrink-0 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+              {kitchen.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No kitchen flags yet.</p>}
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => addFlag('kitchen')}>Add kitchen flag</Button>
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel>Individual flags — apply to one student (each drops one tier)</FieldLabel>
+            <div className="space-y-2">
+              {individual.map(f => (
+                <div key={f.id} className="flex items-center gap-2">
+                  <TextField value={f.label} onChange={v => setLabel(f.id, v)} aria-label="Flag label" className="flex-1" />
+                  <button onClick={() => removeFlag(f.id)} aria-label={`Remove ${f.label}`}
+                    className="shrink-0 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+              {individual.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No individual flags yet.</p>}
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => addFlag('individual')}>Add individual flag</Button>
+          </div>
+
+          <button
+            onClick={() => update(DEFAULT_FLAGS.map(f => ({ ...f })))}
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] underline"
+          >
+            Reset to the built-in flags
+          </button>
+        </>
+      )}
+    </Card>
+  )
+}
+
 function SecuritySection() {
   const toast = useToast()
   const [security, setSecurity] = useState(null)
@@ -328,6 +428,7 @@ function App() {
             <AccountSection />
             <AppearanceSection />
             <CoursesSection />
+            <LabFlagsSection />
             <SecuritySection />
             <DeviceLinkExport />
             <DangerZone />

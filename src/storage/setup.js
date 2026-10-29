@@ -12,6 +12,7 @@
 // and don't need a second, disconnected copy of the same grouping.
 
 import { kvGet, kvSet } from './kv.js'
+import { DEFAULT_FLAGS } from '../config/labFlags.js'
 
 const STORAGE_KEY = 'setup'
 
@@ -162,4 +163,24 @@ export async function deleteTerm(termId) {
   delete terms[termId]
   setup.terms = terms
   await saveSetup(setup)
+}
+
+// ---- Lab flags ----
+// The teacher-editable flag list, shared across every course (unlike the
+// per-course `settings`), so one set of lab expectations applies everywhere.
+// Stored as flag definitions ({ id, label, scope, severity }); a saved lab keeps
+// only flag ids, so re-rating a flag minor<->major recomputes past labs. Absent
+// until the first edit, so the built-in DEFAULT_FLAGS seed and stay improvable.
+// Deliberately top-level: resetCourseSetup does NOT clear this.
+
+export async function getFlags() {
+  const setup = await getSetup()
+  return setup.flags ?? DEFAULT_FLAGS
+}
+
+export async function saveFlags(flags) {
+  const setup = await getSetup()
+  setup.flags = flags
+  await saveSetup(setup)
+  return flags
 }

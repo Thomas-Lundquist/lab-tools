@@ -12,17 +12,23 @@
 // flows through studentScore; the caller substitutes it when present === false.
 export const ABSENT_SCORE = 0
 
-// Kitchen score from the kitchen's minor/critical flag counts. `exceeded` is a
-// manual per-kitchen toggle for the top mark and is only reachable by a kitchen
-// with no criticals and fewer than two minors.
+// Kitchen score from the kitchen's minor/critical flag counts. A clean kitchen
+// (no flags) earns the top tier (4) by default — needing no correction is the
+// reward. Each problem lowers it; a critical (major) is worth about two minors.
 //
 //   >= 2 critical  OR  >= 4 minor  -> 1
 //   >= 1 critical  OR  >= 2 minor  -> 2
-//   otherwise                      -> exceeded ? 4 : 3
-export function kitchenScore(minorCount, criticalCount, exceeded = false) {
+//   >= 1 minor                     -> 3
+//   clean                          -> 4 (top)
+//
+// The two kinds of "4" are split downstream in deriveStudentScore: this clean 4
+// posts the configured soft top (maxScore, e.g. 3.6), while the manual "Exceeded"
+// toggle there posts a true 4 (100%). See storage/labGrading.js.
+export function kitchenScore(minorCount, criticalCount) {
   if (criticalCount >= 2 || minorCount >= 4) return 1
   if (criticalCount >= 1 || minorCount >= 2) return 2
-  return exceeded ? 4 : 3
+  if (minorCount >= 1) return 3
+  return 4
 }
 
 // A student's score is their kitchen's score minus one tier per individual flag,

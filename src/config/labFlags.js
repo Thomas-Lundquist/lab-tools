@@ -37,19 +37,40 @@ export const INDIVIDUAL_FLAGS = [
   { id: 'eating-or-drinking',       label: 'Eating or drinking outside of tasting',       scope: 'individual' },
 ]
 
-// Lookup by id across both lists — handy when a stored lab only kept flag ids.
-export const FLAG_BY_ID = Object.fromEntries(
-  [...KITCHEN_FLAGS, ...INDIVIDUAL_FLAGS].map(f => [f.id, f]),
-)
+// The built-in defaults as one flat list. Seeds the teacher-editable store
+// (storage/setup.js getFlags) and is the fallback whenever no custom list exists.
+export const DEFAULT_FLAGS = [...KITCHEN_FLAGS, ...INDIVIDUAL_FLAGS]
 
-// Count the minor and critical kitchen flags in a set of kitchen flag ids.
-// Unknown ids (a flag removed from the lists after a lab was saved) are ignored
-// rather than throwing, so old labs still score.
-export function countKitchenSeverities(flagIds = []) {
+// Lookup by id across the built-in lists — the default index for callers that
+// have no custom flag config (e.g. unit tests). Live screens pass their own
+// resolved index instead (see flagIndex / resolveFlags).
+export const FLAG_BY_ID = Object.fromEntries(DEFAULT_FLAGS.map(f => [f.id, f]))
+
+// Resolve the active flag list: the teacher's stored list if there is one, else
+// the built-in defaults. `stored` is whatever storage/setup.js getFlags returned.
+export function resolveFlags(stored) {
+  return stored ?? DEFAULT_FLAGS
+}
+
+// Split a flag list into the lookups the screens need: an id->flag map plus the
+// scope-filtered arrays the kitchen/individual pickers render.
+export function flagIndex(flags = DEFAULT_FLAGS) {
+  return {
+    byId: Object.fromEntries(flags.map(f => [f.id, f])),
+    kitchen: flags.filter(f => f.scope === 'kitchen'),
+    individual: flags.filter(f => f.scope === 'individual'),
+  }
+}
+
+// Count the minor and critical kitchen flags in a set of kitchen flag ids, using
+// the given id->flag index (defaults to the built-in one). Unknown ids (a flag
+// removed after a lab was saved) are ignored rather than throwing, so old labs
+// still score.
+export function countKitchenSeverities(flagIds = [], byId = FLAG_BY_ID) {
   let minor = 0
   let critical = 0
   for (const id of flagIds) {
-    const flag = FLAG_BY_ID[id]
+    const flag = byId[id]
     if (flag?.scope !== 'kitchen') continue
     if (flag.severity === 'critical') critical++
     else if (flag.severity === 'minor') minor++

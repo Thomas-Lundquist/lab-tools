@@ -21,7 +21,7 @@
 //                     students: { [studentId]: { kitchen, flagIds, present } } }
 
 import { kvGet, kvSet } from './kv.js'
-import { countKitchenSeverities } from '../config/labFlags.js'
+import { countKitchenSeverities, FLAG_BY_ID } from '../config/labFlags.js'
 import { kitchenScore, studentScore, ABSENT_SCORE } from '../pages/labs/kitchenScoring.js'
 
 const STORAGE_KEY = 'labGrading'
@@ -98,36 +98,33 @@ export function activeSection(state) {
 }
 
 // One student's live score, derived from the stored flags. Absent short-circuits
-// to ABSENT_SCORE and never runs through studentScore.
-export function deriveStudentScore(section, studentId, maxScore = 4) {
+// to ABSENT_SCORE and never runs through studentScore. `flagsById` is the current
+// (teacher-editable) flag index, so a severity change recomputes old labs.
+export function deriveStudentScore(section, studentId, maxScore = 4, flagsById = FLAG_BY_ID) {
   const student = section?.students?.[studentId]
   if (!student) return null
   if (student.present === false) return ABSENT_SCORE
   const indivCount = (student.flagIds ?? []).length
-  // Raw 1–4 tier. An individual "exceeded" marks a standout even when the kitchen
-  // is not a 4 — but only if that student has no individual flags (flags win over
-  // exceeded, same as the kitchen rule).
-  let raw
-  if (student.exceeded && indivCount === 0) {
-    raw = 4
-  } else {
-    const kitchen = student.kitchen != null ? section?.kitchens?.[student.kitchen] : null
-    const { minor, critical } = countKitchenSeverities(kitchen?.flagIds ?? [])
-    const ks = kitchenScore(minor, critical, kitchen?.exceeded ?? false)
-    raw = studentScore(ks, indivCount)
-  }
-  // Cap only the top: a perfect 4 posts as the course's configured max (default
-  // 4, e.g. 3.6 for a softer A). Lower tiers (3/2/1) and absent (0) are
-  // unchanged. See DECISIONS.md, "Configurable top score".
-  return raw === 4 ? maxScore : raw
+  // A student marked "Exceeded" earns a true 4 = 100% regardless of their kitchen's
+  // flags, as long as they carry no individual flags of their own (flags win).
+  if (student.exceeded && indivCount === 0) return 4
+  const kitchen = student.kitchen != null ? section?.kitchens?.[student.kitchen] : null
+  const { minor, critical } = countKitchenSeverities(kitchen?.flagIds ?? [], flagsById)
+  const tier = studentScore(kitchenScore(minor, critical), indivCount)
+  // A clean result (tier 4) posts the top: the kitchen's "Exceeded" toggle upgrades
+  // it to a true 4 (100%), otherwise it posts the configured max (default 4, e.g.
+  // 3.6 for a softer A). Any flag that pulls the tier below 4 overrides the toggle
+  // and posts that lower tier as-is. Absent (0) is handled above. See DECISIONS.md.
+  if (tier === 4) return kitchen?.exceeded ? 4 : maxScore
+  return tier
 }
 
-// Every student's live score, keyed by studentId. maxScore flows through to the
-// top-cap in deriveStudentScore.
-export function deriveSectionScores(section, maxScore = 4) {
+// Every student's live score, keyed by studentId. maxScore and the flag index
+// flow through to deriveStudentScore.
+export function deriveSectionScores(section, maxScore = 4, flagsById = FLAG_BY_ID) {
   const out = {}
   for (const studentId of Object.keys(section?.students ?? {})) {
-    out[studentId] = deriveStudentScore(section, studentId, maxScore)
+    out[studentId] = deriveStudentScore(section, studentId, maxScore, flagsById)
   }
   return out
 }
