@@ -157,3 +157,7 @@ export function setStudentKitchen(section, studentId, kitchenNo) {
 export function setPresent(section, studentId, present) {
   return withStudent(section, studentId, { present })
 }
+
+export function setStudentComment(section, studentId, comment) {
+  return withStudent(section, studentId, { comment })
+}
