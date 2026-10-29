@@ -103,10 +103,15 @@ export function deriveStudentScore(section, studentId) {
   const student = section?.students?.[studentId]
   if (!student) return null
   if (student.present === false) return ABSENT_SCORE
+  const indivCount = (student.flagIds ?? []).length
+  // An individual "exceeded" marks a standout even when the kitchen is not a 4 —
+  // but only if that student has no individual flags (flags win over exceeded,
+  // same as the kitchen rule).
+  if (student.exceeded && indivCount === 0) return 4
   const kitchen = student.kitchen != null ? section?.kitchens?.[student.kitchen] : null
   const { minor, critical } = countKitchenSeverities(kitchen?.flagIds ?? [])
   const ks = kitchenScore(minor, critical, kitchen?.exceeded ?? false)
-  return studentScore(ks, (student.flagIds ?? []).length)
+  return studentScore(ks, indivCount)
 }
 
 // Every student's live score, keyed by studentId.
@@ -160,4 +165,8 @@ export function setPresent(section, studentId, present) {
 
 export function setStudentComment(section, studentId, comment) {
   return withStudent(section, studentId, { comment })
+}
+
+export function setStudentExceeded(section, studentId, exceeded) {
+  return withStudent(section, studentId, { exceeded })
 }

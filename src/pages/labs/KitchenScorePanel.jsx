@@ -19,7 +19,7 @@ import { KITCHEN_FLAGS, INDIVIDUAL_FLAGS, FLAG_BY_ID } from '../../config/labFla
 import {
   getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft,
   deriveSectionScores, deriveStudentScore, emptySection,
-  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment,
+  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded,
 } from '../../storage/labGrading.js'
 import { commitAbsent } from './absentCommit.js'
 
@@ -412,6 +412,13 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           onClick={() => onApply(setPresent(section, student.userId, absent))}>
           {absent ? 'Absent' : 'Present'}
         </Button>
+        {!absent && (
+          <Chip tone="exceeded" active={!!st.exceeded}
+            onClick={() => onApply(setStudentExceeded(section, student.userId, !st.exceeded))}
+            title="Mark this student as exceeding expectations (4)">
+            Exceeded (4)
+          </Chip>
+        )}
         {absent && (
           <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
             <input type="checkbox" checked={!!st.excused}
@@ -489,7 +496,9 @@ function buildComment(section, studentId, score, includeFlags) {
     const kitchen = st.kitchen != null ? section.kitchens[st.kitchen] : null
     const kitchenLabels = (kitchen?.flagIds ?? []).map(id => FLAG_BY_ID[id]?.label).filter(Boolean)
     const indivLabels = (st.flagIds ?? []).map(id => FLAG_BY_ID[id]?.label).filter(Boolean)
-    if (kitchenLabels.length || indivLabels.length) {
+    if (st.exceeded && indivLabels.length === 0) {
+      parts.push(`Professionalism: ${score}/4 — Exceeded expectations`)
+    } else if (kitchenLabels.length || indivLabels.length) {
       const lines = [`Professionalism: ${score}/4`]
       if (kitchenLabels.length) lines.push(`Kitchen: ${kitchenLabels.join(', ')}`)
       if (indivLabels.length) lines.push(`Individual: ${indivLabels.join(', ')}`)

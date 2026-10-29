@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   emptyState, isUnsavedDraft, activeSection, deriveStudentScore, deriveSectionScores,
-  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent,
+  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentExceeded,
 } from './labGrading.js'
 
 // A small section: kitchen 1 has two minor flags (-> kitchenScore 2); two
@@ -100,6 +100,28 @@ test('toggling an individual flag is reversible', () => {
   assert.equal(deriveStudentScore(section, 's3'), 3)
   section = toggleStudentFlag(section, 's3', 'ignored-correction') // back to 4
   assert.equal(deriveStudentScore(section, 's3'), 4)
+})
+
+test('individual exceeded lifts one student to 4 even when the kitchen is not', () => {
+  let section = sampleSection() // s1 is in kitchen 1 (2 minor -> kitchen score 2)
+  // Clear s1's individual flag first, then mark them exceeded.
+  section = toggleStudentFlag(section, 's1', 'phone-out') // remove the flag
+  section = setStudentExceeded(section, 's1', true)
+  assert.equal(deriveStudentScore(section, 's1'), 4)
+})
+
+test('individual exceeded is ignored when the student has an individual flag', () => {
+  let section = sampleSection() // s1 has one individual flag (phone-out)
+  section = setStudentExceeded(section, 's1', true)
+  assert.equal(deriveStudentScore(section, 's1'), 1) // flag wins: kitchen 2 minus 1 flag
+})
+
+test('individual exceeded does not change other students in the kitchen', () => {
+  let section = sampleSection()
+  section = toggleStudentFlag(section, 's1', 'phone-out')
+  section = setStudentExceeded(section, 's1', true)
+  // s2 shares kitchen 1 but is absent -> still 0; nobody else is lifted.
+  assert.equal(deriveStudentScore(section, 's2'), 0)
 })
 
 test('marking present/absent flips the score to and from zero', () => {

@@ -117,6 +117,11 @@
      the same reason — dark mode's success *text* is a light green. One value
      works in both modes; white sits on it. */
   --color-success-fill:   #15803D;
+  /* Fills behind white text for the lab flag chips. Same rule as the two above:
+     --color-warning/--color-info are *text* tokens that lighten in dark mode, so
+     white text on them is unreadable. These fixed fills hold in both modes. */
+  --color-warning-fill:   #B45309;
+  --color-info-fill:      #1D4ED8;
 
   /* ── Elevation shadows (layered ambient + key) ── */
   --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);

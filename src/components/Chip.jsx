@@ -8,12 +8,15 @@
 //   individual -> info     (blue)    exceeded -> success (green)
 //   note / deduct are kept for the legacy ScorePanel.
 
+// All active tones use *-fill tokens: fixed dark colors that keep white text
+// readable in both light and dark mode. The plain --color-warning/--color-info
+// tokens are for text and lighten in dark mode, so they must not back white text.
 const TONES = {
-  minor:      'border-[var(--color-warning)] text-white bg-[var(--color-warning)]',
+  minor:      'border-[var(--color-warning-fill)] text-white bg-[var(--color-warning-fill)]',
   critical:   'border-[var(--color-danger-fill)] text-white bg-[var(--color-danger-fill)]',
-  individual: 'border-[var(--color-info)] text-white bg-[var(--color-info)]',
+  individual: 'border-[var(--color-info-fill)] text-white bg-[var(--color-info-fill)]',
   exceeded:   'border-[var(--color-success-fill)] text-white bg-[var(--color-success-fill)]',
-  note:       'border-[var(--color-info)] text-white bg-[var(--color-info)]',
+  note:       'border-[var(--color-info-fill)] text-white bg-[var(--color-info-fill)]',
   deduct:     'border-[var(--color-danger-fill)] text-white bg-[var(--color-danger-fill)]',
 }
 
