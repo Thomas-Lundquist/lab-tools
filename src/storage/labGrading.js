@@ -99,26 +99,35 @@ export function activeSection(state) {
 
 // One student's live score, derived from the stored flags. Absent short-circuits
 // to ABSENT_SCORE and never runs through studentScore.
-export function deriveStudentScore(section, studentId) {
+export function deriveStudentScore(section, studentId, maxScore = 4) {
   const student = section?.students?.[studentId]
   if (!student) return null
   if (student.present === false) return ABSENT_SCORE
   const indivCount = (student.flagIds ?? []).length
-  // An individual "exceeded" marks a standout even when the kitchen is not a 4 —
-  // but only if that student has no individual flags (flags win over exceeded,
-  // same as the kitchen rule).
-  if (student.exceeded && indivCount === 0) return 4
-  const kitchen = student.kitchen != null ? section?.kitchens?.[student.kitchen] : null
-  const { minor, critical } = countKitchenSeverities(kitchen?.flagIds ?? [])
-  const ks = kitchenScore(minor, critical, kitchen?.exceeded ?? false)
-  return studentScore(ks, indivCount)
+  // Raw 1–4 tier. An individual "exceeded" marks a standout even when the kitchen
+  // is not a 4 — but only if that student has no individual flags (flags win over
+  // exceeded, same as the kitchen rule).
+  let raw
+  if (student.exceeded && indivCount === 0) {
+    raw = 4
+  } else {
+    const kitchen = student.kitchen != null ? section?.kitchens?.[student.kitchen] : null
+    const { minor, critical } = countKitchenSeverities(kitchen?.flagIds ?? [])
+    const ks = kitchenScore(minor, critical, kitchen?.exceeded ?? false)
+    raw = studentScore(ks, indivCount)
+  }
+  // Cap only the top: a perfect 4 posts as the course's configured max (default
+  // 4, e.g. 3.6 for a softer A). Lower tiers (3/2/1) and absent (0) are
+  // unchanged. See DECISIONS.md, "Configurable top score".
+  return raw === 4 ? maxScore : raw
 }
 
-// Every student's live score, keyed by studentId.
-export function deriveSectionScores(section) {
+// Every student's live score, keyed by studentId. maxScore flows through to the
+// top-cap in deriveStudentScore.
+export function deriveSectionScores(section, maxScore = 4) {
   const out = {}
   for (const studentId of Object.keys(section?.students ?? {})) {
-    out[studentId] = deriveStudentScore(section, studentId)
+    out[studentId] = deriveStudentScore(section, studentId, maxScore)
   }
   return out
 }
@@ -169,4 +178,13 @@ export function setStudentComment(section, studentId, comment) {
 
 export function setStudentExceeded(section, studentId, exceeded) {
   return withStudent(section, studentId, { exceeded })
+}
+
+// Toggle one reusable library comment on a student. Stored as a list of the
+// comment bodies themselves (not ids), so a later edit to the course's library
+// does not strip a comment already attached to graded work. buildComment folds
+// these into the posted submission comment.
+export function toggleStudentLibraryComment(section, studentId, comment) {
+  const prev = section.students?.[studentId] ?? { kitchen: null, flagIds: [], present: true }
+  return withStudent(section, studentId, { libraryComments: toggleId(prev.libraryComments, comment) })
 }

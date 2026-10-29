@@ -43,6 +43,28 @@ test('deriveSectionScores returns every student', () => {
   assert.deepEqual(deriveSectionScores(sampleSection()), { s1: 1, s2: 0, s3: 4 })
 })
 
+// --- maxScore: cap only the top tier ---
+
+test('a top (4) posts as the configured max score', () => {
+  assert.equal(deriveStudentScore(sampleSection(), 's3', 3.6), 3.6)
+})
+
+test('lower tiers are untouched by a lowered max score', () => {
+  assert.equal(deriveStudentScore(sampleSection(), 's1', 3.6), 1) // kitchen 2 - 1 flag -> 1
+})
+
+test('absent stays 0 with a lowered max score', () => {
+  assert.equal(deriveStudentScore(sampleSection(), 's2', 3.6), 0)
+})
+
+test('deriveSectionScores caps only the top across the section', () => {
+  assert.deepEqual(deriveSectionScores(sampleSection(), 3.6), { s1: 1, s2: 0, s3: 3.6 })
+})
+
+test('max score defaults to 4 (no change)', () => {
+  assert.equal(deriveStudentScore(sampleSection(), 's3'), 4)
+})
+
 // --- isUnsavedDraft / activeSection (two-slot: committed vs draft) ---
 
 test('fresh empty state is not an unsaved draft', () => {

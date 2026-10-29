@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { Loader, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
+import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Select from '../../components/Select.jsx'
@@ -19,7 +19,7 @@ import { KITCHEN_FLAGS, INDIVIDUAL_FLAGS, FLAG_BY_ID } from '../../config/labFla
 import {
   getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft,
   deriveSectionScores, deriveStudentScore, emptySection,
-  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded,
+  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
 import { commitAbsent } from './absentCommit.js'
 
@@ -127,11 +127,14 @@ export default function KitchenScorePanel({
 
   // Every edit goes through here: update state AND debounce-save a draft. Load and
   // Resume call setSection directly, so a draft is only ever written by a real edit.
-  function applySection(next) {
+  // useCallback keeps this reference stable across re-renders so memoized
+  // StudentRows do not all re-render on every keystroke (the onApply prop would
+  // otherwise change identity each render and defeat the memo).
+  const applySection = useCallback((next) => {
     setSection(next)
     clearTimeout(autosaveTimer.current)
     autosaveTimer.current = setTimeout(() => { saveDraft(labId, sectionId, next) }, 600)
-  }
+  }, [labId, sectionId])
 
   function resumeDraft() {
     const draft = buildSection(roster, pendingDraft.draft, profScores)
@@ -154,6 +157,7 @@ export default function KitchenScorePanel({
   async function doCommit() {
     setSaving(true)
     const commentsOn = !!courseSetup?.settings?.sendDeductionReasonsAsComment
+    const maxScore = courseSetup?.settings?.maxScore ?? 4
     let done = 0, failed = 0
     for (const s of roster) {
       const st = section.students[s.userId]
@@ -233,8 +237,12 @@ export default function KitchenScorePanel({
     : sections
   const overridesLoading = !!entry && profOverrides === null
 
-  const scores = deriveSectionScores(section)
+  const maxScore = courseSetup?.settings?.maxScore ?? 4
+  const scores = deriveSectionScores(section, maxScore)
   const commentsOn = !!courseSetup?.settings?.sendDeductionReasonsAsComment
+  // Memoized so its reference is stable across keystrokes — an inline `?? []`
+  // would mint a new array each render and re-render every memoized row.
+  const commentLibrary = useMemo(() => courseSetup?.settings?.commentLibrary ?? [], [courseSetup])
   const presentUnassigned = roster.filter(s => {
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null
@@ -318,18 +326,29 @@ export default function KitchenScorePanel({
                 <div className="flex items-center justify-between gap-3 px-4 py-2 bg-[var(--color-bg-hover)] border-b-2 border-[var(--color-border-strong)]">
                   <h3 className="text-sm font-bold text-[var(--color-text-body)]">Kitchen {k}</h3>
                   <Chip tone="exceeded" active={exceeded} onClick={() => applySection(setKitchenExceeded(section, k, !exceeded))}>
-                    Exceeded (4)
+                    Exceeded ({maxScore})
                   </Chip>
                 </div>
                 <div className="px-4 py-3 space-y-3">
                   {/* Kitchen flags apply to everyone in this kitchen. */}
-                  <FlagPicker
-                    label="Add kitchen flag…"
-                    options={KITCHEN_FLAGS}
-                    selectedIds={kflags}
-                    toneFor={kitchenTone}
-                    onToggle={id => applySection(toggleKitchenFlag(section, k, id))}
-                  />
+                  <div className="space-y-1.5">
+                    <FlagModalPicker
+                      title={`Kitchen ${k} — add flags`}
+                      options={KITCHEN_FLAGS}
+                      selectedIds={kflags}
+                      toneFor={kitchenTone}
+                      onToggle={id => applySection(toggleKitchenFlag(section, k, id))}
+                    />
+                    {kflags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {kflags.map(id => (
+                          <Chip key={id} tone={kitchenTone(id)} active onClick={() => applySection(toggleKitchenFlag(section, k, id))} title="Remove">
+                            {FLAG_BY_ID[id]?.label ?? id} ✕
+                          </Chip>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Roster for this kitchen. */}
                   <div className="divide-y divide-[var(--color-border-subtle)]">
@@ -338,7 +357,7 @@ export default function KitchenScorePanel({
                     )}
                     {members.map(s => (
                       <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                        kitchenCount={kitchenCount} onApply={applySection} />
+                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore} onApply={applySection} />
                     ))}
                   </div>
                 </div>
@@ -355,7 +374,7 @@ export default function KitchenScorePanel({
               <div className="px-4 py-2 divide-y divide-[var(--color-border-subtle)]">
                 {unassigned.map(s => (
                   <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                    kitchenCount={kitchenCount} onApply={applySection} />
+                    kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore} onApply={applySection} />
                 ))}
               </div>
             </Card>
@@ -408,11 +427,30 @@ export default function KitchenScorePanel({
 // expands the controls, so a long roster stays clean until a student needs edits.
 // The controls live in a display:contents wrapper so they lay out inline in the
 // row on md+ (md:contents) and only hide on a collapsed phone — no duplicate markup.
-function StudentRow({ student, section, score, kitchenCount, onApply }) {
+function StudentRowBase({ student, section, score, kitchenCount, commentLibrary = [], maxScore = 4, onApply }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
-  const availableFlags = INDIVIDUAL_FLAGS.filter(f => !st.flagIds.includes(f.id))
   const [open, setOpen] = useState(false)
+  const [commentOpen, setCommentOpen] = useState(false)   // big write modal (Apple Pencil / large screen)
+  const [libraryOpen, setLibraryOpen] = useState(false)   // comment-library picker modal
+
+  // Library chips shared by the "+" picker and the enlarge modal. Toggles attach
+  // or remove a saved comment on this student.
+  const libraryChips = (
+    <div className="flex flex-wrap gap-1.5">
+      {commentLibrary.map(c => {
+        const on = (st.libraryComments ?? []).includes(c)
+        return (
+          <Chip key={c} tone="note" active={on}
+            onClick={() => onApply(toggleStudentLibraryComment(section, student.userId, c))}
+            title={on ? 'Remove this comment' : 'Add this comment'}>
+            {c}
+          </Chip>
+        )
+      })}
+    </div>
+  )
+  const attachedCount = (st.libraryComments ?? []).length
   return (
     <div className="py-2 md:py-1.5 space-y-1.5 md:space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
@@ -426,7 +464,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
         <span className="shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate max-w-[8rem] md:max-w-none md:w-36" title={student.userName}>{student.userName}</span>
-        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
+        <span className={`inline-flex items-center justify-center w-10 h-7 shrink-0 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
         <Button size="sm" variant={absent ? 'danger' : 'success'}
@@ -443,7 +481,7 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           {!absent && (
             <Chip tone="exceeded" active={!!st.exceeded}
               onClick={() => onApply(setStudentExceeded(section, student.userId, !st.exceeded))}
-              title="Mark this student as exceeding expectations (4)">Exceeds</Chip>
+              title={`Mark this student as exceeding expectations (${maxScore})`}>Exceeds</Chip>
           )}
           {absent && (
             <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -455,28 +493,47 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           <Select
             value={st.kitchen == null ? '' : String(st.kitchen)}
             onChange={v => onApply(setStudentKitchen(section, student.userId, v === '' ? null : Number(v)))}
-            className="w-24 shrink-0"
+            className={`${st.kitchen == null ? 'w-36' : 'w-24'} shrink-0`}
             options={[
               { value: '', label: 'No kitchen' },
               ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
             ]}
           />
           {!absent && (
-            <Select
-              value=""
-              onChange={id => { if (id) onApply(toggleStudentFlag(section, student.userId, id)) }}
-              className="w-full md:w-56"
-              options={[{ value: '', label: 'Add flag…' }, ...availableFlags.map(f => ({ value: f.id, label: f.label }))]}
+            <FlagModalPicker
+              title={`${student.userName} — add flags`}
+              options={INDIVIDUAL_FLAGS}
+              selectedIds={st.flagIds}
+              onToggle={id => onApply(toggleStudentFlag(section, student.userId, id))}
             />
           )}
-          <input
-            type="text"
-            value={st.comment ?? ''}
-            onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
-            placeholder="Comment (optional)"
-            aria-label={`Comment for ${student.userName}`}
-            className="w-full md:flex-1 md:min-w-[14rem] text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
-          />
+          <div className="w-full md:flex-1 md:min-w-[14rem] flex items-center gap-1">
+            <input
+              type="text"
+              value={st.comment ?? ''}
+              onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
+              placeholder="Comment (optional)"
+              aria-label={`Comment for ${student.userName}`}
+              className="flex-1 min-w-0 text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
+            />
+            {commentLibrary.length > 0 && (
+              <button type="button" onClick={() => setLibraryOpen(true)}
+                aria-label={`Insert a saved comment for ${student.userName}`}
+                title="Insert a saved comment"
+                className="shrink-0 relative p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-body)]">
+                <Plus size={16} />
+                {attachedCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 text-[0.6rem] font-bold text-[var(--color-info)]">{attachedCount}</span>
+                )}
+              </button>
+            )}
+            <button type="button" onClick={() => setCommentOpen(true)}
+              aria-label={`Write a longer comment for ${student.userName}`}
+              title="Enlarge the comment box"
+              className="shrink-0 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-body)]">
+              <Maximize2 size={16} />
+            </button>
+          </div>
         </div>
       </div>
       {!absent && st.flagIds.length > 0 && (
@@ -488,33 +545,87 @@ function StudentRow({ student, section, score, kitchenCount, onApply }) {
           ))}
         </div>
       )}
+      {commentOpen && (
+        <Modal
+          title={`Comment — ${student.userName}`}
+          onClose={() => setCommentOpen(false)}
+          footer={<Button onClick={() => setCommentOpen(false)}>Done</Button>}
+        >
+          <textarea
+            autoFocus
+            value={st.comment ?? ''}
+            onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
+            placeholder="Write a comment for this student"
+            className="w-full h-48 text-sm px-3 py-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)]"
+          />
+          {commentLibrary.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              <p className="text-xs text-[var(--color-text-muted)]">Saved comments — tap to add or remove</p>
+              {libraryChips}
+            </div>
+          )}
+        </Modal>
+      )}
+      {libraryOpen && (
+        <Modal
+          title={`Saved comments — ${student.userName}`}
+          onClose={() => setLibraryOpen(false)}
+          footer={<Button onClick={() => setLibraryOpen(false)}>Done</Button>}
+        >
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">Tap to add or remove. These post as submission comments on commit.</p>
+          {libraryChips}
+        </Modal>
+      )}
     </div>
   )
 }
 
-// Add-from-dropdown flag picker: the full list stays collapsed in a Select; the
-// chosen flags show below as removable, severity-colored tags. Replaces the old
-// always-visible chip wall to cut visual complexity.
-function FlagPicker({ label, options, selectedIds, toneFor, onToggle }) {
-  const available = options.filter(o => !selectedIds.includes(o.id))
+// Re-render a row only when its own inputs change. applySection replaces just the
+// edited student's object (every other student keeps its reference), and onApply /
+// commentLibrary are stabilized in the parent — so typing in one comment or
+// reassigning one kitchen no longer re-renders the whole roster. `score` already
+// reflects this student's kitchen flags, so comparing it covers kitchen changes.
+function studentRowEqual(prev, next) {
+  return prev.score === next.score
+    && prev.kitchenCount === next.kitchenCount
+    && prev.maxScore === next.maxScore
+    && prev.commentLibrary === next.commentLibrary
+    && prev.onApply === next.onApply
+    && prev.section.students[prev.student.userId] === next.section.students[next.student.userId]
+}
+const StudentRow = memo(StudentRowBase, studentRowEqual)
+
+// Compact flag picker: a small "⚑ Flag" button that opens a modal of toggle
+// chips. Tapping a chip adds or removes that flag immediately; the selected flags
+// still render as removable pills at the call site, so this component is only the
+// picker, not the display. Replaces the old flag dropdown — easier to tap on an
+// iPad, and it frees row space for the comment controls.
+function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="space-y-1.5">
-      <Select
-        value=""
-        onChange={id => { if (id) onToggle(id) }}
-        className="w-full sm:w-72"
-        options={[{ value: '', label }, ...available.map(o => ({ value: o.id, label: o.label }))]}
-      />
-      {selectedIds.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {selectedIds.map(id => (
-            <Chip key={id} tone={toneFor(id)} active onClick={() => onToggle(id)} title="Remove">
-              {FLAG_BY_ID[id]?.label ?? id} ✕
-            </Chip>
-          ))}
-        </div>
+    <>
+      <Button size="sm" variant="secondary" icon={Flag} onClick={() => setOpen(true)}>Flag</Button>
+      {open && (
+        <Modal
+          title={title}
+          onClose={() => setOpen(false)}
+          footer={<Button onClick={() => setOpen(false)}>Done</Button>}
+        >
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">Tap to add or remove.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {options.map(o => {
+              const on = selectedIds.includes(o.id)
+              return (
+                <Chip key={o.id} tone={toneFor ? toneFor(o.id) : 'individual'} active={on}
+                  onClick={() => onToggle(o.id)} title={on ? 'Remove' : 'Add'}>
+                  {o.label}
+                </Chip>
+              )
+            })}
+          </div>
+        </Modal>
       )}
-    </div>
+    </>
   )
 }
 
@@ -537,6 +648,10 @@ function buildComment(section, studentId, score, includeFlags) {
       if (indivLabels.length) lines.push(`Individual: ${indivLabels.join(', ')}`)
       parts.push(lines.join('\n'))
     }
+  }
+  for (const lib of (st.libraryComments ?? [])) {
+    const t = lib.trim()
+    if (t) parts.push(t)
   }
   const free = (st.comment ?? '').trim()
   if (free) parts.push(free)

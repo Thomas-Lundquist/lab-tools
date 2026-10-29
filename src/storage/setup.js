@@ -19,7 +19,8 @@ export const DEFAULT_SETTINGS = {
   syncLabsToFocus: false,       // per-lab professionalism assignments -> Focus (SIS)
   syncUnitTermToFocus: true,    // unit/term score assignments -> Focus (SIS)
   deductionReasons: ['Dishes left in sink', 'Station not wiped', 'Equipment put away wet', 'Off task'],
-  commentLibrary: [],           // reusable feedback comments, pickable in the Score tab
+  commentLibrary: [],           // reusable feedback comments, pickable per student in the Lab tab
+  maxScore: 4,                  // value a top (perfect) lab posts; caps only the top tier, lower tiers unchanged
   sendDeductionReasonsAsComment: false,
   zeroJournalWhenAbsent: true,
   journalDueOffsetDays: 1,      // Journal due date = lab date + this many days

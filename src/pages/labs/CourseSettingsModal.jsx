@@ -108,6 +108,10 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearChoice, setClearChoice]           = useState('keep')
   const [clearing, setClearing]                 = useState(false)
+  // Local string mirror for the top-score field. A number input bound straight to
+  // the setting cannot hold a half-typed decimal like "3." — it parses to 3 and
+  // blocks the "6". So keep the raw text here and commit a clamped number on blur.
+  const [maxScoreInput, setMaxScoreInput]       = useState(String(setup?.settings?.maxScore ?? 4))
 
   useEffect(() => {
     if (!courseId) return
@@ -121,6 +125,12 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
       })
       .finally(() => setLoading(false))
   }, [courseId])
+
+  // Keep the top-score field in step with the saved value — after a commit, and
+  // when the course (hence setup) changes under us.
+  useEffect(() => {
+    setMaxScoreInput(String(setup?.settings?.maxScore ?? 4))
+  }, [setup?.settings?.maxScore])
 
   async function updateSettings(fieldPatch) {
     const updated = await saveCourseSettings(courseId, fieldPatch)
@@ -151,6 +161,16 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     if (!c || library.includes(c)) { setNewComment(''); return }
     updateSettings({ commentLibrary: [...library, c] })
     setNewComment('')
+  }
+
+  // Clamp to a sane range on blur. 1 is the lowest non-absent tier, so a top
+  // below it would invert the scale; 4 is the raw ceiling. Reflect the clamped
+  // value back into the field so what shows is what was saved.
+  function commitMaxScore() {
+    const n = parseFloat(maxScoreInput)
+    const clamped = Number.isFinite(n) ? Math.min(4, Math.max(1, n)) : 4
+    updateSettings({ maxScore: clamped })
+    setMaxScoreInput(String(clamped))
   }
 
   function removeComment(c) {
@@ -309,6 +329,25 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
             </label>
 
             <div>
+              <FieldLabel>Top score</FieldLabel>
+              <p className="text-xs text-[var(--color-text-muted)] mb-2">
+                The value a perfect lab posts. Lower it (for example to 3.6) to soften a top A. Only the top mark changes; the 3, 2, 1, and absent (0) tiers stay the same.
+              </p>
+              <label className="flex items-center justify-between gap-3 text-sm max-w-xs">
+                <span>Maximum score (out of 4)</span>
+                <TextField
+                  type="text"
+                  inputMode="decimal"
+                  value={maxScoreInput}
+                  onChange={setMaxScoreInput}
+                  onBlur={commitMaxScore}
+                  aria-label="Maximum score out of 4"
+                  className="w-20 text-right"
+                />
+              </label>
+            </div>
+
+            <div>
               <FieldLabel>Deduction reasons</FieldLabel>
               <div className="flex flex-wrap gap-2 mb-2">
                 {setup.settings.deductionReasons.map(r => (
@@ -329,7 +368,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
             <div>
               <FieldLabel>Comment library</FieldLabel>
               <p className="text-xs text-[var(--color-text-muted)] mb-2">
-                Reusable feedback you can pick in the Score tab. These add to the submission comment but do not change the score.
+                Reusable feedback you can tap on each student in the Lab tab. These add to the submission comment but do not change the score.
               </p>
               <div className="flex flex-wrap gap-2 mb-2">
                 {(setup.settings.commentLibrary ?? []).map(c => (
