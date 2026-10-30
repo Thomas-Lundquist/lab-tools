@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { ShieldAlert, Lock, AlertTriangle } from 'lucide-react'
 import { verifyPin, recordFailedAttempt, clearFailedAttempts, isLockedOut, getLockoutRemaining, resetExtension } from '../security/pin.js'
-import { pageUrl } from '../utils/nav.js'
+import { navigate } from '../utils/nav.js'
 
 export default function PinPrompt({ onVerified, onCancel, warning }) {
   const [view, setView]             = useState('pin')   // 'pin' | 'lockout' | 'reset'
@@ -69,7 +69,7 @@ export default function PinPrompt({ onVerified, onCancel, warning }) {
 
   async function handleReset() {
     await resetExtension()
-    window.location.href = pageUrl('src/pages/onboarding/index.html')
+    navigate('onboarding', {}, { replace: true, remount: true })
   }
 
   if (view === 'lockout') {

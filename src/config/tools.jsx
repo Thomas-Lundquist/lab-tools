@@ -23,6 +23,6 @@ export const TOOLS = [
     shortLabel:  'Labs',
     description: 'Create Professionalism assignments (paired with a lab journal, or standalone), take attendance, score students, and roll scores up by Unit and Term back to the gradebook.',
     Icon:        CalendarCheck,
-    path:        'src/pages/labs/index.html',
+    route:       'labs',
   },
 ]

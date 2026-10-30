@@ -1,32 +1,17 @@
-import { getCanvasUrl } from '../storage/account.js'
-import { getDecryptedToken } from '../storage/encryption.js'
 import { AuthError, RateLimitError, NotFoundError, ApiError } from './errors.js'
+import { canvasOrigin, csrfToken } from './canvasContext.js'
 
-// Canvas sends no CORS headers (Instructure cloud instances can't be
-// configured to), so a browser fetch straight to Canvas is blocked before it
-// ever reaches the server. Every request instead goes through our own
-// same-origin proxy (api/canvas/[...path].js), which forwards it
-// server-to-server where CORS doesn't apply. X-Canvas-Base tells the proxy
-// which Canvas instance to forward to; it must be re-read on every call
-// (not just in buildUrl) because canvasGetAll follows pagination URLs that
-// bypass buildUrl entirely.
-const PROXY_PREFIX = '/api/canvas'
+// The app runs inside the Canvas origin (launched by launch.js — see
+// DECISIONS.md), so every request is same-origin and authenticates with the
+// teacher's own Canvas session cookie: no API token, no proxy, no CORS.
+// Non-GET requests need Canvas's CSRF token. In local dev, Vite's dev server
+// proxies /api/v1 to Canvas with a token from .env.local (see vite.config.js),
+// so the same code path works on localhost.
 
 let rateLimitBackoffUntil = null
 
-async function getAuthHeaders() {
-  const token = await getDecryptedToken()
-  if (!token) throw new AuthError('No API token found. Please complete setup.')
-  const canvasUrl = await getCanvasUrl()
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'X-Canvas-Base': canvasUrl,
-  }
-}
-
-async function buildUrl(path, params = {}) {
-  const url = new URL(`${PROXY_PREFIX}${path}`, window.location.origin)
+function buildUrl(path, params = {}) {
+  const url = new URL(path, canvasOrigin())
   url.searchParams.set('per_page', '100')
   for (const [key, value] of Object.entries(params)) {
     if (Array.isArray(value)) {
@@ -38,15 +23,23 @@ async function buildUrl(path, params = {}) {
   return url.toString()
 }
 
+function buildHeaders(method) {
+  const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+  if (method !== 'GET') {
+    const token = csrfToken()
+    if (token) headers['X-CSRF-Token'] = token
+  }
+  return headers
+}
+
 async function executeRequest({ url, method, body }) {
   if (rateLimitBackoffUntil && Date.now() < rateLimitBackoffUntil) {
     await sleep(rateLimitBackoffUntil - Date.now())
   }
 
-  const headers = await getAuthHeaders()
-  const response = await fetch(url, { method, headers, body })
+  const response = await fetch(url, { method, headers: buildHeaders(method), body, credentials: 'same-origin' })
 
-  if (response.status === 401) throw new AuthError('API token is invalid or expired.')
+  if (response.status === 401) throw new AuthError('Your Canvas session has expired. Log in to Canvas again, then relaunch Lab Tools.')
   if (response.status === 404) throw new NotFoundError(`Resource not found: ${url}`)
 
   if (response.status === 403) {
@@ -63,10 +56,23 @@ async function executeRequest({ url, method, body }) {
   return response
 }
 
-function extractNextPageUrl(linkHeader) {
+// Session-authenticated Canvas JSON can be prefixed with `while(1);` (a JSON
+// hijacking guard). Strip it before parsing. DELETE and some PUTs return an
+// empty body.
+async function readJson(response) {
+  const text = (await response.text()).replace(/^while\(1\);/, '')
+  return text ? JSON.parse(text) : null
+}
+
+// Canvas's Link header carries absolute URLs on Canvas's own host. Re-root the
+// path + query on canvasOrigin() so pagination stays on the same route as the
+// first page (in dev that's the localhost proxy, not Canvas directly).
+export function extractNextPageUrl(linkHeader, origin = canvasOrigin()) {
   if (!linkHeader) return null
   const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
-  return match ? match[1] : null
+  if (!match) return null
+  const next = new URL(match[1], origin)
+  return new URL(next.pathname + next.search, origin).toString()
 }
 
 function extractTotalEstimate(linkHeader) {
@@ -74,7 +80,7 @@ function extractTotalEstimate(linkHeader) {
   const match = linkHeader.match(/<([^>]*)>;\s*rel="last"/)
   if (!match) return null
   try {
-    const url = new URL(match[1], window.location.origin)
+    const url = new URL(match[1], canvasOrigin())
     const lastPage = parseInt(url.searchParams.get('page') ?? '')
     const perPage = parseInt(url.searchParams.get('per_page') ?? '')
     if (!lastPage || !perPage) return null
@@ -89,19 +95,18 @@ function sleep(ms) {
 }
 
 export async function canvasGet(path, params = {}) {
-  const url = await buildUrl(path, params)
-  const response = await executeRequest({ url, method: 'GET' })
-  return response.json()
+  const response = await executeRequest({ url: buildUrl(path, params), method: 'GET' })
+  return readJson(response)
 }
 
 export async function canvasGetAll(path, params = {}, onProgress) {
   let allResults = []
-  let url = await buildUrl(path, params)
+  let url = buildUrl(path, params)
   let estimatedTotal = null
 
   while (url) {
     const response = await executeRequest({ url, method: 'GET' })
-    const data = await response.json()
+    const data = await readJson(response)
     allResults = allResults.concat(Array.isArray(data) ? data : [data])
     const linkHeader = response.headers.get('Link')
     if (estimatedTotal === null) estimatedTotal = extractTotalEstimate(linkHeader)
@@ -113,18 +118,15 @@ export async function canvasGetAll(path, params = {}, onProgress) {
 }
 
 export async function canvasPut(path, body = {}) {
-  const url = await buildUrl(path)
-  const response = await executeRequest({ url, method: 'PUT', body: JSON.stringify(body) })
-  return response.json()
+  const response = await executeRequest({ url: buildUrl(path), method: 'PUT', body: JSON.stringify(body) })
+  return readJson(response)
 }
 
 export async function canvasPost(path, body = {}) {
-  const url = await buildUrl(path)
-  const response = await executeRequest({ url, method: 'POST', body: JSON.stringify(body) })
-  return response.json()
+  const response = await executeRequest({ url: buildUrl(path), method: 'POST', body: JSON.stringify(body) })
+  return readJson(response)
 }
 
 export async function canvasDelete(path) {
-  const url = await buildUrl(path)
-  await executeRequest({ url, method: 'DELETE' })
+  await executeRequest({ url: buildUrl(path), method: 'DELETE' })
 }

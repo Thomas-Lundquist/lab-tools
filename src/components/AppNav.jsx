@@ -1,12 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { ChevronDown, Check, Settings } from 'lucide-react'
 import { TOOLS, MODULES } from '../config/tools.jsx'
-import { pageUrl } from '../utils/nav.js'
-
-function navigate(path) {
-  if (window.location.href.includes(path)) return
-  window.location.href = pageUrl(path)
-}
+import { navigate } from '../utils/nav.js'
 
 export default function AppNav({ current }) {
   const [open, setOpen] = useState(false)
@@ -77,7 +72,7 @@ export default function AppNav({ current }) {
                 return (
                   <button
                     key={tool.id}
-                    onClick={() => { navigate(tool.path); setOpen(false) }}
+                    onClick={() => { if (!active) navigate(tool.route); setOpen(false) }}
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left hover:bg-[var(--color-bg-hover)] transition-colors duration-75"
                     role="menuitem"
                   >
@@ -107,7 +102,7 @@ export default function AppNav({ current }) {
 export function SettingsButton() {
   return (
     <button
-      onClick={() => navigate('src/settings/index.html')}
+      onClick={() => navigate('settings')}
       className="p-2 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-hover)] transition-colors duration-75"
       title="Settings"
       aria-label="Settings"
@@ -132,7 +127,7 @@ export function BrandMark() {
 export function BrandLogo() {
   return (
     <button
-      onClick={() => navigate('src/shell/index.html')}
+      onClick={() => navigate('home')}
       className="hover:opacity-80 transition-opacity shrink-0"
       aria-label="Culinary Canvas Tools home"
     >

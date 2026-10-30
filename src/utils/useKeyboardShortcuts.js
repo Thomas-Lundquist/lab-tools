@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
-import { pageUrl } from './nav.js'
+import { navigate, useRoute } from './nav.js'
 
 // pageShortcuts shape:
 // [{ key: 'a', ctrl: true, shift: false, combo: 'Ctrl + A', description: '...', action: fn }]
 export function useKeyboardShortcuts(pageShortcuts = []) {
   const [showPanel, setShowPanel] = useState(false)
+  const { route } = useRoute()
+  const routeRef = useRef(route)
+  useEffect(() => { routeRef.current = route })
   // Ref keeps action closures current without re-registering the listener
   const shortcutsRef = useRef(pageShortcuts)
   useEffect(() => { shortcutsRef.current = pageShortcuts })
@@ -17,9 +20,7 @@ export function useKeyboardShortcuts(pageShortcuts = []) {
       // Ctrl+, — open Settings (skip if already on settings page)
       if (e.key === ',' && (e.ctrlKey || e.metaKey) && !inTextField) {
         e.preventDefault()
-        if (!window.location.href.includes('settings/index.html')) {
-          window.location.href = pageUrl('src/settings/index.html')
-        }
+        if (routeRef.current !== 'settings') navigate('settings')
         return
       }
 

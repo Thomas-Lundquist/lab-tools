@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { createRoot } from 'react-dom/client'
-import { Eye, EyeOff, CheckCircle, AlertCircle, Loader, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
+import { CheckCircle, AlertCircle, Loader, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
 import { BrandLogo } from '../components/AppNav.jsx'
 import ToolShell from '../components/ToolShell.jsx'
 import SkipLink from '../components/SkipLink.jsx'
@@ -11,89 +10,40 @@ import TextField from '../components/TextField.jsx'
 import Select from '../components/Select.jsx'
 import Callout from '../components/Callout.jsx'
 import Skeleton from '../components/Skeleton.jsx'
-import { ToastProvider, useToast } from '../components/Toast.jsx'
-import SetupGuard from '../components/SetupGuard.jsx'
-import DeviceLinkExport from '../components/DeviceLinkExport.jsx'
-import { verifyToken } from '../api/auth.js'
+import { useToast } from '../components/Toast.jsx'
+import { getCurrentUser } from '../api/auth.js'
+import { canvasOrigin } from '../api/canvasContext.js'
 import { getCourses } from '../api/courses.js'
-import { getAccount, saveAccount } from '../storage/account.js'
 import { getPreferences, setPreference } from '../storage/preferences.js'
 import { getFlags, saveFlags } from '../storage/setup.js'
 import { DEFAULT_FLAGS } from '../config/labFlags.js'
 import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../security/pin.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
-import { pageUrl } from '../utils/nav.js'
-import '../styles/global.css'
+import { navigate } from '../utils/nav.js'
 
 function AccountSection() {
-  const toast = useToast()
-  const [account, setAccount]   = useState(null)
-  const [editing, setEditing]   = useState(false)
-  const [canvasUrl, setCanvasUrl] = useState('')
-  const [token, setToken]       = useState('')
-  const [showToken, setShowToken] = useState(false)
-  const [verifying, setVerifying] = useState(false)
-  const [error, setError]       = useState(null)
+  const [user, setUser]   = useState(null)
+  const [error, setError] = useState(null)
 
-  useEffect(() => { getAccount().then(acc => { setAccount(acc); setCanvasUrl(acc?.canvasUrl ?? '') }) }, [])
-
-  async function handleSave() {
-    if (!token.trim()) { setError('Enter the new API token.'); return }
-    setVerifying(true)
-    setError(null)
-    try {
-      const user = await verifyToken(canvasUrl, token)
-      await saveAccount({ canvasUrl, token, userName: user.name })
-      setAccount(await getAccount())
-      setEditing(false)
-      setToken('')
-      toast('Canvas account reconnected', 'success')
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setVerifying(false)
-    }
-  }
-
-  if (!account) return <Card><Loader size={16} className="animate-spin" /></Card>
+  useEffect(() => { getCurrentUser().then(setUser).catch(err => setError(err.message)) }, [])
 
   return (
     <Card className="space-y-4">
       <h2 className="text-base font-semibold text-[var(--color-text-body)]">Canvas Account</h2>
-
-      {!editing ? (
-        <>
-          <div className="text-sm space-y-1">
-            <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">Canvas URL</span><span className="font-medium text-[var(--color-text-body)]">{account.canvasUrl}</span></div>
-            <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">Signed in as</span><span className="font-medium text-[var(--color-text-body)]">{account.userName ?? '—'}</span></div>
-            <div className="flex justify-between items-center">
-              <span className="text-[var(--color-text-muted)]">Status</span>
-              <span className="flex items-center gap-1 font-medium text-[var(--color-success)]">
-                <CheckCircle size={14} /> {account.verificationStatus === 'valid' ? 'Connected' : account.verificationStatus}
-              </span>
-            </div>
-          </div>
-          <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>Change URL / Token</Button>
-        </>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Lab Tools runs inside Canvas and uses your Canvas login. There is no API token to manage — to switch accounts, log in to Canvas as someone else and relaunch.
+      </p>
+      {error ? (
+        <p className="text-sm text-[var(--color-error)] flex items-center gap-1"><AlertCircle size={14} />{error}</p>
+      ) : !user ? (
+        <Loader size={16} className="animate-spin" />
       ) : (
-        <div className="space-y-3">
-          <div>
-            <FieldLabel htmlFor="canvasUrl">Canvas URL</FieldLabel>
-            <TextField id="canvasUrl" value={canvasUrl} onChange={setCanvasUrl} placeholder="https://yourschool.instructure.com" />
-          </div>
-          <div>
-            <FieldLabel htmlFor="token">New API token</FieldLabel>
-            <div className="relative">
-              <TextField id="token" type={showToken ? 'text' : 'password'} value={token} onChange={setToken} placeholder="Paste your API token" className="pr-10" />
-              <button type="button" onClick={() => setShowToken(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
-                {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-          {error && <p className="text-sm text-[var(--color-error)] flex items-center gap-1"><AlertCircle size={14} />{error}</p>}
-          <div className="flex gap-2">
-            <Button onClick={handleSave} disabled={verifying}>{verifying ? 'Verifying…' : 'Verify & Save'}</Button>
-            <Button variant="ghost" onClick={() => { setEditing(false); setError(null); setToken('') }}>Cancel</Button>
+        <div className="text-sm space-y-1">
+          <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">Canvas</span><span className="font-medium text-[var(--color-text-body)]">{new URL(canvasOrigin()).host}</span></div>
+          <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">Signed in as</span><span className="font-medium text-[var(--color-text-body)]">{user.name}</span></div>
+          <div className="flex justify-between items-center">
+            <span className="text-[var(--color-text-muted)]">Status</span>
+            <span className="flex items-center gap-1 font-medium text-[var(--color-success)]"><CheckCircle size={14} /> Connected</span>
           </div>
         </div>
       )}
@@ -394,17 +344,17 @@ function DangerZone() {
 
   async function handleReset() {
     await resetExtension()
-    window.location.href = pageUrl('src/pages/onboarding/index.html')
+    navigate('onboarding', {}, { replace: true, remount: true })
   }
 
   return (
     <Card className="space-y-3">
       <h2 className="text-base font-semibold text-[var(--color-error)]">Danger Zone</h2>
       <p className="text-sm text-[var(--color-text-muted)]">
-        Resetting clears your stored Canvas token, PIN, and preferences on this device. You'll need to go through setup again.
+        Resetting clears this tool's PIN, preferences, course setup, and saved grading drafts on this device. Canvas itself is not touched. You'll need to go through setup again.
       </p>
       {!confirming ? (
-        <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>Reset Extension</Button>
+        <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>Reset Lab Tools</Button>
       ) : (
         <Callout tone="error" title="This cannot be undone.">
           <div className="flex gap-2 mt-2">
@@ -417,7 +367,7 @@ function DangerZone() {
   )
 }
 
-function App() {
+export default function Settings() {
   return (
     <>
       <SkipLink />
@@ -430,7 +380,6 @@ function App() {
             <CoursesSection />
             <LabFlagsSection />
             <SecuritySection />
-            <DeviceLinkExport />
             <DangerZone />
           </div>
         </div>
@@ -438,8 +387,3 @@ function App() {
     </>
   )
 }
-
-getPreferences().then(p => { applyPalette(p.palette); applyDarkMode(p.themeMode ?? 'system'); applyTextSize(p.textSize ?? 'medium') })
-createRoot(document.getElementById('root')).render(
-  <SetupGuard><ToastProvider><App /></ToastProvider></SetupGuard>
-)

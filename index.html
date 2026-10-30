@@ -2,14 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="refresh" content="0; url=src/shell/index.html" />
-  <title>Culinary Canvas Tools</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab Tools — Install</title>
   <link rel="icon" href="/favicon.ico" sizes="48x48" />
   <link rel="icon" href="/icon-source.svg" sizes="any" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
   <meta name="theme-color" content="#B7102A" />
+  <script src="/theme-init.js"></script>
 </head>
-<body>
-  <script src="/root-redirect.js"></script>
+<body class="bg-[var(--color-bg-page)]">
+  <!-- This site only serves Lab Tools' code. The app itself runs inside Canvas
+       (see DECISIONS.md): this page just hands out the launchers. -->
+  <main class="max-w-2xl mx-auto px-6 py-10 space-y-6 text-[var(--color-text-body)]">
+    <header class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-[var(--radius-control)] flex items-center justify-center bg-[var(--cpt-color)]">
+        <span class="text-white font-black">C</span>
+      </div>
+      <h1 class="text-2xl font-bold">Culinary Canvas Tools</h1>
+    </header>
+
+    <p class="text-sm text-[var(--color-text-secondary)]">
+      Lab Tools runs <strong>inside Canvas</strong>, using your Canvas login. Student data goes only between your browser and Canvas — it never passes through this website, which only serves the app's code. Install a launcher below, then open it from Canvas.
+    </p>
+
+    <section class="card p-6 space-y-3">
+      <h2 class="text-base font-semibold">Laptop — bookmarklet</h2>
+      <ol class="list-decimal list-inside text-sm text-[var(--color-text-secondary)] space-y-1.5">
+        <li>Show your bookmarks bar, then drag this button onto it: <a id="bookmarklet" class="btn-primary inline-flex ml-1" href="#">Lab Tools</a></li>
+        <li>Open any Canvas page while logged in, then click the bookmark. Lab Tools opens in a new tab.</li>
+      </ol>
+      <p class="text-xs text-[var(--color-text-muted)]">If nothing opens, allow pop-ups for Canvas. Reloading the Lab Tools tab blanks it — just click the bookmark again; nothing is lost.</p>
+    </section>
+
+    <section class="card p-6 space-y-3">
+      <h2 class="text-base font-semibold">iPad — one-tap launch (Userscripts)</h2>
+      <ol class="list-decimal list-inside text-sm text-[var(--color-text-secondary)] space-y-1.5">
+        <li>Install <strong>Userscripts</strong> (free, open source) from the App Store, and turn it on in Settings › Safari › Extensions, allowed on <code id="canvas-host-1"></code>.</li>
+        <li>In Userscripts, add a new script and paste this in: <button id="copy-userscript" class="btn-secondary text-xs ml-1" type="button">Copy script</button></li>
+        <li>In Safari, open <code id="launch-url"></code> and add it to your Home Screen or bookmarks. That opens Lab Tools in one tap.</li>
+      </ol>
+      <pre id="userscript" class="text-xs bg-[var(--color-bg-hover)] rounded-lg p-3 overflow-x-auto"></pre>
+      <p class="text-xs text-[var(--color-text-muted)]">Use Safari, not the Canvas app — the Canvas app can't run Lab Tools. If tapping a Canvas link opens the Canvas app, type the address in Safari instead.</p>
+    </section>
+
+    <section class="card p-6 space-y-3">
+      <h2 class="text-base font-semibold">iPad — bookmarklet (no extension)</h2>
+      <ol class="list-decimal list-inside text-sm text-[var(--color-text-secondary)] space-y-1.5">
+        <li>Bookmark any page in Safari, then copy the bookmarklet: <button id="copy-bookmarklet" class="btn-secondary text-xs ml-1" type="button">Copy bookmarklet</button></li>
+        <li>Edit the bookmark: name it <strong>Lab Tools</strong> and replace its address with what you copied.</li>
+        <li>On a Canvas page in Safari, open your bookmarks and tap <strong>Lab Tools</strong>.</li>
+      </ol>
+    </section>
+
+    <p id="copied" class="text-xs text-[var(--color-success)] h-4" role="status"></p>
+  </main>
+  <script type="module" src="/src/install/main.js"></script>
 </body>
 </html>

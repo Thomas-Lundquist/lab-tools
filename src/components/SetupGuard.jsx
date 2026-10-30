@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { isSetupComplete } from '../storage/account.js'
-import { pageUrl } from '../utils/nav.js'
+import { navigate } from '../utils/nav.js'
 
 export default function SetupGuard({ children }) {
   const [ready, setReady] = useState(false)
@@ -8,7 +8,7 @@ export default function SetupGuard({ children }) {
   useEffect(() => {
     isSetupComplete().then(complete => {
       if (!complete) {
-        window.location.href = pageUrl('src/pages/onboarding/index.html')
+        navigate('onboarding', {}, { replace: true })
       } else {
         setReady(true)
       }

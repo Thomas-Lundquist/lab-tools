@@ -1,19 +1,15 @@
-﻿import React, { useState, useEffect } from 'react'
-import { createRoot } from 'react-dom/client'
+import React, { useState, useEffect } from 'react'
 import { LayoutGrid, List, ChevronRight } from 'lucide-react'
 import { SettingsButton, BrandMark } from '../components/AppNav.jsx'
 import { TOOLS, MODULES } from '../config/tools.jsx'
 import { getPreferences, setPreference } from '../storage/preferences.js'
-import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
-import '../styles/global.css'
-import { ToastProvider } from '../components/Toast.jsx'
-import SetupGuard from '../components/SetupGuard.jsx'
+import { applyPalette, applyDarkMode } from '../utils/color.js'
 import SkipLink from '../components/SkipLink.jsx'
 import { useKeyboardShortcuts } from '../utils/useKeyboardShortcuts.js'
 import ShortcutsPanel from '../components/ShortcutsPanel.jsx'
-import { pageUrl } from '../utils/nav.js'
+import { navigate } from '../utils/nav.js'
 
-function App() {
+export default function Home() {
   const [displayMode, setDisplayMode] = useState('tiles')
 
   useEffect(() => {
@@ -23,10 +19,6 @@ function App() {
       setDisplayMode(p.homepageDisplayMode ?? 'tiles')
     })
   }, [])
-
-  function navigateTo(path) {
-    window.location.href = pageUrl(path)
-  }
 
   function toggleMode() {
     const next = displayMode === 'tiles' ? 'list' : 'tiles'
@@ -74,7 +66,7 @@ function App() {
                 {group.tools.map(tool => (
                   <button
                     key={tool.id}
-                    onClick={() => navigateTo(tool.path)}
+                    onClick={() => navigate(tool.route)}
                     className="group card p-6 text-left hover:bg-[var(--color-bg-hover)] transition-colors duration-75"
                   >
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-4">
@@ -90,7 +82,7 @@ function App() {
                 {group.tools.map((tool, i) => (
                   <button
                     key={tool.id}
-                    onClick={() => navigateTo(tool.path)}
+                    onClick={() => navigate(tool.route)}
                     className={`group w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-[var(--color-bg-hover)] transition-colors duration-75 ${i > 0 ? 'border-t border-[var(--color-border-subtle)]' : ''}`}
                   >
                     <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0">
@@ -113,5 +105,3 @@ function App() {
   )
 }
 
-getPreferences().then(p => { applyPalette(p.palette); applyDarkMode(p.themeMode ?? 'system'); applyTextSize(p.textSize ?? 'medium') })
-createRoot(document.getElementById('root')).render(<SetupGuard><ToastProvider><App /></ToastProvider></SetupGuard>)

@@ -1,3 +1,5 @@
+import { KEY_PREFIX } from '../storage/kv.js'
+
 export function darkenHex(hex, amount = 30) {
   const n = parseInt(hex.replace('#', ''), 16)
   const r = Math.max(0, (n >> 16) - amount)
@@ -21,7 +23,7 @@ export function normalizePalette(name) {
 export function applyPalette(name = 'bauhaus') {
   const palette = normalizePalette(name)
   document.documentElement.setAttribute('data-theme', palette)
-  try { localStorage.setItem('cpt_palette', palette) } catch { /* storage unavailable */ }
+  try { localStorage.setItem(KEY_PREFIX + 'cpt_palette', palette) } catch { /* storage unavailable */ }
 }
 
 // Applies or removes the 'dark' class on <html> based on mode.
@@ -30,7 +32,7 @@ export function applyDarkMode(mode = 'system') {
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
   const isDark = mode === 'dark' || (mode === 'system' && prefersDark)
   document.documentElement.classList.toggle('dark', isDark)
-  try { localStorage.setItem('cpt_theme', mode) } catch { /* storage unavailable */ }
+  try { localStorage.setItem(KEY_PREFIX + 'cpt_theme', mode) } catch { /* storage unavailable */ }
 }
 
 // Tags <html> with the chosen size so all rem-based sizes scale proportionally.
@@ -49,5 +51,5 @@ export function applyTextSize(size = 'medium') {
   // it finds straight onto the attribute before paint, and an unrecognised key
   // matches no rule — the page would render at the browser default for a frame
   // and then jump once this ran.
-  try { localStorage.setItem('cpt_text_size', resolved) } catch { /* storage unavailable */ }
+  try { localStorage.setItem(KEY_PREFIX + 'cpt_text_size', resolved) } catch { /* storage unavailable */ }
 }
