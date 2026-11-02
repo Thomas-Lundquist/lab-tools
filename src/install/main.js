@@ -24,4 +24,17 @@ async function copy(text, label) {
 }
 
 document.getElementById('copy-userscript').addEventListener('click', () => copy(userscript, 'Script'))
+
+// The iPad can't easily edit a script file, so hand it over as a download.
+// Built here from this page's own location, like the other launchers, so it
+// works on any deployment; the static labtools.user.js (emitted at build time
+// — see vite.config.js) is the one-tap install route.
+document.getElementById('download-userscript').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([userscript], { type: 'text/javascript' }))
+  const a = Object.assign(document.createElement('a'), { href: url, download: 'labtools.user.js' })
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+})
 document.getElementById('copy-bookmarklet').addEventListener('click', () => copy(bookmarklet, 'Bookmarklet'))

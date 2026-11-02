@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
+import { buildUserscript } from './src/install/launchers.js'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -33,6 +34,21 @@ function emitLauncher() {
         .replace('__CSS__', JSON.stringify([...css]))
         .replace('/*__THEME_INIT__*/', readFileSync(resolve(__dirname, 'public/theme-init.js'), 'utf8').trim())
       this.emitFile({ type: 'asset', fileName: 'launch.js', source })
+
+      // dist/labtools.user.js: the userscript as a file, so the iPad can install
+      // it from a link (Userscripts offers "Install" on a .user.js URL) instead
+      // of pasting. It must name this site's launch.js absolutely, so it uses
+      // the stable URL Vercel gives the build: the production domain, or the
+      // branch's preview URL. A local build has neither and skips it; the
+      // install page's Download button builds the same script in the browser.
+      const host = process.env.VERCEL_ENV === 'production'
+        ? process.env.VERCEL_PROJECT_PRODUCTION_URL
+        : process.env.VERCEL_BRANCH_URL || process.env.VERCEL_URL
+      if (host) {
+        this.emitFile({ type: 'asset', fileName: 'labtools.user.js', source: buildUserscript(`https://${host}/launch.js`) + '\n' })
+      } else {
+        this.warn('emit-launcher: no Vercel URL in the environment — skipping labtools.user.js')
+      }
     },
   }
 }

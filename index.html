@@ -37,10 +37,16 @@
     <section class="card p-6 space-y-3">
       <h2 class="text-base font-semibold">iPad — one-tap launch (Userscripts)</h2>
       <ol class="list-decimal list-inside text-sm text-[var(--color-text-secondary)] space-y-1.5">
-        <li>Install <strong>Userscripts</strong> (free, open source) from the App Store, and turn it on in Settings › Safari › Extensions, allowed on <code id="canvas-host-1"></code>.</li>
-        <li>In Userscripts, add a new script and paste this in: <button id="copy-userscript" class="btn-secondary text-xs ml-1" type="button">Copy script</button></li>
-        <li>In Safari, open <code id="launch-url"></code> and add it to your Home Screen or bookmarks. That opens Lab Tools in one tap.</li>
+        <li>Install <strong>Userscripts</strong> (free, open source) from the App Store. Open it once and choose a folder for your scripts. Then turn it on in Settings › Apps › Safari › Extensions, allowed on <code id="canvas-host-1"></code>.</li>
+        <li>Add the Lab Tools script, either way:
+          <ul class="list-disc list-inside ml-5 mt-1 space-y-1">
+            <li><a id="install-userscript" class="btn-primary text-xs inline-flex" href="labtools.user.js">Install script</a> — opens the script; then tap Safari's extensions button (<strong>aA</strong> or the puzzle piece) › <strong>Userscripts</strong> › <strong>Install</strong>.</li>
+            <li><button id="download-userscript" class="btn-secondary text-xs" type="button">Download script</button> — saves <code>labtools.user.js</code> to Files › Downloads; in the Files app, move it into your Userscripts folder.</li>
+          </ul>
+        </li>
+        <li>In Safari, open <code id="launch-url"></code> and add it to your Home Screen or bookmarks. If the Add to Home Screen sheet shows <strong>Open as Web App</strong>, turn it off — the extension only runs in Safari itself. That opens Lab Tools in one tap.</li>
       </ol>
+      <p class="text-xs text-[var(--color-text-muted)]">On a laptop with Tampermonkey, paste the script into a new script instead: <button id="copy-userscript" class="btn-secondary text-xs ml-1" type="button">Copy script</button></p>
       <pre id="userscript" class="text-xs bg-[var(--color-bg-hover)] rounded-lg p-3 overflow-x-auto"></pre>
       <p class="text-xs text-[var(--color-text-muted)]">Use Safari, not the Canvas app — the Canvas app can't run Lab Tools. If tapping a Canvas link opens the Canvas app, type the address in Safari instead.</p>
     </section>
