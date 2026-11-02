@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
-import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus } from 'lucide-react'
+import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus, Undo2, XCircle } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Select from '../../components/Select.jsx'
@@ -12,39 +12,20 @@ import { useToast } from '../../components/Toast.jsx'
 import { usePinGate } from '../../security/usePinGate.jsx'
 import { getSections } from '../../api/sections.js'
 import { getEnrollments } from '../../api/enrollments.js'
-import { getAssignmentSubmissions, updateSubmissionGrade } from '../../api/submissions.js'
+import { getAssignmentSubmissions } from '../../api/submissions.js'
 import { getOverrides } from '../../api/overrides.js'
 import { getCourseSetup, getLabs, isStandalone, getFlags, getCommentBank } from '../../storage/setup.js'
 import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
-  getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft,
-  deriveSectionScores, deriveStudentScore, emptySection,
+  getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, getPeriodStatuses,
+  deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
-import { commitAbsent } from './absentCommit.js'
+import { planCommit, buildSection } from './commitPlan.js'
+import { runCommit, runRevert } from './commitRun.js'
 
-// Absence convention, unchanged from the old tabs: a professionalism score of
-// exactly 0 is what an absence writes, so "currently 0" means "already absent".
-const WRITTEN_ZERO = 0
 const DEFAULT_KITCHENS = 8
 
-// Build the working section from the roster, seeding each student from the prior
-// (committed or draft) flags and from Canvas for present/absent. A Canvas score
-// of 0 means already-absent; null/ungraded or a real score means present.
-function buildSection(roster, prior, profScores) {
-  const students = {}
-  for (const s of roster) {
-    const was = prior?.students?.[s.userId]
-    const canvas = profScores[s.userId]
-    students[s.userId] = {
-      kitchen: was?.kitchen ?? null,
-      flagIds: was?.flagIds ?? [],
-      present: was ? was.present : canvas !== WRITTEN_ZERO,
-      excused: was?.excused ?? false,
-    }
-  }
-  return { kitchens: prior?.kitchens ?? {}, students }
-}
 
 // Stable empty list for the comment bank before it loads, so memoized rows
 // don't see a new array every render.
@@ -68,16 +49,22 @@ export default function KitchenScorePanel({
   const [rosterLoading, setRosterLoading] = useState(false)
   const [roster, setRoster]           = useState([])   // [{ userId, userName }]
   const [profScores, setProfScores]   = useState({})   // userId -> score|null
-  const [profComments, setProfComments] = useState({}) // userId -> [existing comment bodies]
+  const [profState, setProfState]     = useState({})   // userId -> { score, excused, comments }
+  const [loadError, setLoadError]     = useState(null)
+  const [stored, setStored]           = useState(null) // this period's stored grading state (for Revert)
+  const [statuses, setStatuses]       = useState({})   // sectionId -> 'done' | 'draft' (period checkmarks)
   const [section, setSection]         = useState(emptySection())
   const [kitchenCount, setKitchenCount] = useState(DEFAULT_KITCHENS)
 
   const [pendingDraft, setPendingDraft] = useState(null) // the stored state when an unsaved draft exists
   const [confirming, setConfirming]   = useState(false)
+  const [preview, setPreview]         = useState(null) // { plan } | { error } while confirming
+  const [reverting, setReverting]     = useState(false) // revert confirm open
   const [saving, setSaving]           = useState(false)
   const [progress, setProgress]       = useState('')
 
   const autosaveTimer = useRef(null)
+  const [reloadTick, setReloadTick]   = useState(0) // bumped by "Try again" after a failed load
 
   const entry = entries.find(e => e.id === labId) ?? null
 
@@ -106,31 +93,47 @@ export default function KitchenScorePanel({
   useEffect(() => {
     clearTimeout(autosaveTimer.current)
     setPendingDraft(null)
-    if (!entry || !sectionId) { setRoster([]); setProfScores({}); setSection(emptySection()); return }
+    setLoadError(null)
+    if (!entry || !sectionId) { setRoster([]); setProfScores({}); setProfState({}); setStored(null); setSection(emptySection()); return }
+    // A slower response for a period the teacher already left must not land on
+    // the screen (it would show — and then autosave — the wrong period).
+    let cancelled = false
     setRosterLoading(true)
     Promise.all([
       getEnrollments(courseId),
       getAssignmentSubmissions(courseId, entry.professionalismAssignmentId, { includeComments: true }),
       getLabGrading(labId, sectionId),
     ])
-      .then(([enrollments, profSubs, stored]) => {
+      .then(([enrollments, profSubs, storedState]) => {
+        if (cancelled) return
         const sec = sections.find(s => s.id === sectionId)
         const idsInSection = new Set(sec?.studentIds ?? [])
         const inSection = enrollments
           .filter(e => idsInSection.has(e.userId))
           .sort((a, b) => (a.userSortableName ?? '').localeCompare(b.userSortableName ?? ''))
         const r = inSection.map(e => ({ userId: e.userId, userName: e.userName }))
-        const scores = Object.fromEntries(profSubs.map(s => [s.userId, s.score]))
+        const state = profStateFrom(profSubs)
         setRoster(r)
-        setProfScores(scores)
-        setProfComments(Object.fromEntries(profSubs.map(s => [s.userId, s.comments ?? []])))
-        // Baseline from the committed flags; a draft, if any, is offered via prompt.
-        setSection(buildSection(r, stored.committed, scores))
-        setKitchenCount(maxKitchen(stored.committed, stored.draft))
-        if (isUnsavedDraft(stored)) setPendingDraft(stored)
+        setProfScores(Object.fromEntries(profSubs.map(s => [s.userId, s.score])))
+        setProfState(state)
+        setStored(storedState)
+        // Baseline from the committed set; a draft, if any, is offered via prompt.
+        setSection(buildSection(r, storedState.committed, state))
+        setKitchenCount(maxKitchen(storedState.committed, storedState.draft))
+        if (isUnsavedDraft(storedState)) setPendingDraft(storedState)
       })
-      .finally(() => setRosterLoading(false))
-  }, [entry, sectionId, courseId, sections, labId])
+      .catch(err => { if (!cancelled) { setRoster([]); setLoadError(err.message) } })
+      .finally(() => { if (!cancelled) setRosterLoading(false) })
+    return () => { cancelled = true }
+  }, [entry, sectionId, courseId, sections, labId, reloadTick])
+
+  // --- period checkmarks: which periods of this lab are committed / have drafts ---
+  useEffect(() => {
+    if (!labId) { setStatuses({}); return }
+    let cancelled = false
+    getPeriodStatuses(labId).then(st => { if (!cancelled) setStatuses(st) })
+    return () => { cancelled = true }
+  }, [labId, stored])
 
   // Every edit goes through here: update state AND debounce-save a draft. Load and
   // Resume call setSection directly, so a draft is only ever written by a real edit.
@@ -149,72 +152,137 @@ export default function KitchenScorePanel({
       autosaveTimer.current = setTimeout(() => { saveDraft(labId, sectionId, next) }, 600)
       return next
     })
+    setStatuses(prev => (prev[sectionId] === 'draft' ? prev : { ...prev, [sectionId]: 'draft' }))
   }, [labId, sectionId])
 
   function resumeDraft() {
-    const draft = buildSection(roster, pendingDraft.draft, profScores)
+    const draft = buildSection(roster, pendingDraft.draft, profState)
     setSection(draft)
     setKitchenCount(maxKitchen(pendingDraft.draft, pendingDraft.committed))
     setPendingDraft(null)
   }
 
   async function discardAndUseCanvas() {
-    await discardDraft(labId, sectionId)
+    setStored(await discardDraft(labId, sectionId))
     setPendingDraft(null) // section already shows the committed baseline
   }
 
   async function refreshScores() {
     const subs = await getAssignmentSubmissions(courseId, entry.professionalismAssignmentId, { includeComments: true })
     setProfScores(Object.fromEntries(subs.map(s => [s.userId, s.score])))
-    setProfComments(Object.fromEntries(subs.map(s => [s.userId, s.comments ?? []])))
+    setProfState(profStateFrom(subs))
+  }
+
+  // What Canvas holds right now for this period — professionalism scores,
+  // excused states and comments, the journal's, and existing journal locks —
+  // read fresh when the preview opens so the plan matches Canvas exactly.
+  async function loadCanvasSnapshot() {
+    const journalId = entry.journalAssignmentId
+    const [profSubs, journalSubs, journalOverrides] = await Promise.all([
+      getAssignmentSubmissions(courseId, entry.professionalismAssignmentId, { includeComments: true }),
+      journalId ? getAssignmentSubmissions(courseId, journalId) : null,
+      journalId ? getOverrides(courseId, journalId) : null,
+    ])
+    const locks = {}
+    for (const o of journalOverrides ?? []) {
+      if (o.studentIds?.length === 1) locks[o.studentIds[0]] = { id: o.id, lockAt: o.lockAt }
+    }
+    return {
+      prof: profStateFrom(profSubs),
+      journal: journalSubs ? Object.fromEntries(journalSubs.map(s => [s.userId, { score: s.score, excused: !!s.excused }])) : null,
+      locks,
+    }
+  }
+
+  function buildPlan(canvas) {
+    return planCommit({
+      roster, section, prior: stored?.committed ?? null, canvas,
+      ids: { courseId, profId: entry.professionalismAssignmentId, journalId: entry.journalAssignmentId ?? null },
+      settings: {
+        commentsOn: !!courseSetup?.settings?.sendDeductionReasonsAsComment,
+        maxScore: courseSetup?.settings?.maxScore ?? 4,
+        zeroJournalWhenAbsent: courseSetup?.settings?.zeroJournalWhenAbsent ?? true,
+      },
+      byId,
+    })
+  }
+
+  async function openPreview() {
+    setConfirming(true)
+    setPreview(null)
+    try {
+      const canvas = await loadCanvasSnapshot()
+      setPreview({ plan: buildPlan(canvas) })
+    } catch (err) {
+      setPreview({ error: err.message })
+    }
   }
 
   async function doCommit() {
+    // A pending autosave must not land after the commit and resurrect a draft.
+    clearTimeout(autosaveTimer.current)
     setSaving(true)
-    const commentsOn = !!courseSetup?.settings?.sendDeductionReasonsAsComment
-    const maxScore = courseSetup?.settings?.maxScore ?? 4
-    let done = 0, failed = 0
-    for (const s of roster) {
-      const st = section.students[s.userId]
-      try {
-        if (st?.present === false) {
-          await commitAbsent(courseId, entry, s.userId, {
-            excused: st.excused,
-            zeroJournalWhenAbsent: courseSetup.settings.zeroJournalWhenAbsent,
-            userName: s.userName,
-          })
-          // A free-text note on an absent student still posts (timely feedback),
-          // deduped like the present path. Absent students carry no flag summary.
-          const note = buildComment(section, s.userId, 0, commentsOn, byId)
-          if (note && !(profComments[s.userId] ?? []).includes(note)) {
-            await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, { text_comment: note }, {
-              studentName: s.userName, assignmentLabel: entry.name, kind: 'professionalism', existingComments: profComments[s.userId],
-            })
-          }
-        } else {
-          const value = deriveStudentScore(section, s.userId, maxScore, byId)
-          const fields = { posted_grade: String(value) }
-          // Flag summary (gated on the course setting) plus any free-text comment,
-          // as one body. Skip posting if that exact text is already on the
-          // submission, so re-committing unchanged work does not duplicate it.
-          const comment = buildComment(section, s.userId, value, commentsOn, byId)
-          if (comment && !(profComments[s.userId] ?? []).includes(comment)) fields.text_comment = comment
-          // A student with no derivable score posts "null" here, which the
-          // safety checks in updateSubmissionGrade block (LT-CHECK) rather than send.
-          await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, fields, {
-            studentName: s.userName, assignmentLabel: entry.name, kind: 'professionalism', existingComments: profComments[s.userId],
-          })
-        }
-      } catch { failed++ }
-      done++
-      setProgress(`${done} of ${roster.length} saved…`)
+    try {
+      // Re-read Canvas right before writing: the plan acts on the latest state.
+      const plan = buildPlan(await loadCanvasSnapshot())
+      const { failures, record } = await runCommit(plan, {
+        courseId, entry,
+        onProgress: (done, total) => setProgress(`${done} of ${total} students saved…`),
+      })
+      // A partly failed commit keeps the draft, so the period still reads as
+      // unsaved and the resume prompt offers a retry for the students that failed.
+      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0 })
+      setStored(nextStored)
+      setPendingDraft(null)
+      await refreshScores()
+      setConfirming(false)
+      if (failures.length) {
+        const names = failures.slice(0, 3).map(f => f.userName ?? 'a student').join(', ')
+        toast(`${failures.length} of ${plan.students.length} didn't save (${names}${failures.length > 3 ? '…' : ''}). Your work is kept — commit again to retry. Details: Settings › Testing › Diagnostics`, 'warning')
+      } else {
+        toast(`Committed ${plan.students.length} student${plan.students.length === 1 ? '' : 's'} for ${entry.name}`, 'success')
+      }
+      onChanged?.()
+    } catch (err) {
+      toast(`Could not commit: ${err.message}`, 'error')
+    } finally {
+      setSaving(false)
+      setProgress('')
     }
-    await commitLabGrading(labId, sectionId, section)
-    await refreshScores()
-    setSaving(false); setConfirming(false); setProgress('')
-    if (failed) toast(`Committed ${roster.length - failed} of ${roster.length} — ${failed} failed. Details: Settings › Testing › Diagnostics`, 'warning')
-    else toast(`Committed ${roster.length} student${roster.length === 1 ? '' : 's'} for ${entry.name}`, 'success')
-    onChanged?.()
+  }
+
+  async function doRevert() {
+    clearTimeout(autosaveTimer.current)
+    setSaving(true)
+    try {
+      const names = Object.fromEntries(roster.map(r => [r.userId, r.userName]))
+      const { failures } = await runRevert(stored.lastCommit.record, {
+        courseId, entry, names,
+        onProgress: (done, total) => setProgress(`${done} of ${total} students restored…`),
+      })
+      const nextStored = await revertLabGrading(labId, sectionId)
+      setStored(nextStored)
+      // The reverted work is now a draft — offer it like any saved work.
+      setSection(buildSection(roster, nextStored.committed, profState))
+      if (nextStored.draft) setPendingDraft(nextStored)
+      await refreshScores()
+      setReverting(false)
+      if (failures.length) toast(`Reverted, but ${failures.length} student${failures.length === 1 ? '' : 's'} could not be restored. Details: Settings › Testing › Diagnostics`, 'warning')
+      else toast(`Reverted the last commit for ${entry.name}. Your grading is kept as a draft.`, 'success')
+      onChanged?.()
+    } catch (err) {
+      toast(`Could not revert: ${err.message}`, 'error')
+    } finally {
+      setSaving(false)
+      setProgress('')
+    }
+  }
+
+  async function handleRevert() {
+    await requirePin(
+      { action: 'revert_lab_period', summary: `Revert the last commit for ${entry.name} in ${courseName}`, courseId, courseName },
+      doRevert,
+    )
   }
 
   async function handleCommit() {
@@ -269,7 +337,6 @@ export default function KitchenScorePanel({
   const maxScore = courseSetup?.settings?.maxScore ?? 4
   const scores = deriveSectionScores(section, maxScore, byId)
   const kitchenTone = id => (byId[id]?.severity === 'critical' ? 'critical' : 'minor')
-  const commentsOn = !!courseSetup?.settings?.sendDeductionReasonsAsComment
   const presentUnassigned = roster.filter(s => {
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null
@@ -303,7 +370,7 @@ export default function KitchenScorePanel({
             <Select id="period" value={sectionId ?? ''} onChange={sid => onSelect(labId, sid)} disabled={!labId || overridesLoading}
               options={[
                 { value: '', label: overridesLoading ? 'Loading…' : 'Select a period' },
-                ...gradeableSections.map(s => ({ value: s.id, label: s.name })),
+                ...gradeableSections.map(s => ({ value: s.id, label: periodLabel(s.name, statuses[s.id]) })),
               ]} />
           </div>
           <div className="sm:col-span-1">
@@ -337,6 +404,10 @@ export default function KitchenScorePanel({
 
       {rosterLoading && <Skeleton height="20rem" />}
 
+      {!rosterLoading && loadError && (
+        <EmptyState title="Couldn't load this period" body={loadError} actions={<Button onClick={() => setReloadTick(t => t + 1)}>Try again</Button>} />
+      )}
+
       {!rosterLoading && entry && sectionId && roster.length === 0 && (
         <EmptyState title="No students in this period" body="This section has no enrolled students." />
       )}
@@ -353,7 +424,7 @@ export default function KitchenScorePanel({
                 <div className="flex items-center justify-between gap-3 px-4 py-2 bg-[var(--color-bg-hover)] border-b-2 border-[var(--color-border-strong)]">
                   <h3 className="text-sm font-bold text-[var(--color-text-body)]">Kitchen {k}</h3>
                   <Chip tone="exceeded" active={exceeded} onClick={() => applySection(s => setKitchenExceeded(s, k, !exceeded))}>
-                    Exceeded ({maxScore})
+                    Exceeded (4)
                   </Chip>
                 </div>
                 <div className="px-4 py-3 space-y-3">
@@ -413,36 +484,55 @@ export default function KitchenScorePanel({
             <p className="text-xs text-[var(--color-text-muted)]">
               Edits autosave on this device. Nothing posts to Canvas until you commit.
             </p>
-            <Button onClick={() => setConfirming(true)}>Commit Period</Button>
+            <div className="flex flex-wrap gap-2">
+              {stored?.lastCommit && (
+                <Button variant="ghost" icon={Undo2} onClick={() => setReverting(true)}>
+                  Revert last commit ({fmtWhen(stored.lastCommit.at)})
+                </Button>
+              )}
+              <Button onClick={openPreview}>Commit Period…</Button>
+            </div>
           </div>
         </>
       )}
 
       {confirming && (
         <Modal
-          title="Commit this period to Canvas"
+          title="Review before committing"
           onClose={() => !saving && setConfirming(false)}
           footer={<>
             <Button variant="secondary" onClick={() => setConfirming(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleCommit} disabled={saving}>
-              <span className="flex items-center gap-1.5">{saving && <Loader size={13} className="animate-spin" />}Commit</span>
+            <Button onClick={handleCommit} disabled={saving || !preview?.plan || preview.plan.summary.writes === 0}>
+              <span className="flex items-center gap-1.5">{saving && <Loader size={13} className="animate-spin" />}
+                {preview?.plan ? `Commit ${preview.plan.summary.writes} change${preview.plan.summary.writes === 1 ? '' : 's'}` : 'Commit'}
+              </span>
+            </Button>
+          </>}
+        >
+          <CommitPreview preview={preview} presentUnassigned={presentUnassigned.length} entry={entry} />
+          {saving && progress && <p className="text-xs text-[var(--color-text-muted)] mt-2">{progress}</p>}
+        </Modal>
+      )}
+
+      {reverting && stored?.lastCommit && (
+        <Modal
+          title="Revert the last commit?"
+          onClose={() => !saving && setReverting(false)}
+          footer={<>
+            <Button variant="secondary" onClick={() => setReverting(false)} disabled={saving}>Cancel</Button>
+            <Button variant="danger" onClick={handleRevert} disabled={saving}>
+              <span className="flex items-center gap-1.5">{saving && <Loader size={13} className="animate-spin" />}Revert</span>
             </Button>
           </>}
         >
           <div className="text-sm text-[var(--color-text-secondary)] space-y-2">
-            {presentUnassigned.length > 0 && (
-              <p className="flex items-start gap-1.5 text-[var(--color-warning)]">
-                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                {presentUnassigned.length} present student{presentUnassigned.length === 1 ? '' : 's'} {presentUnassigned.length === 1 ? 'has' : 'have'} no kitchen assigned — they will score as a clean kitchen. You can still commit.
-              </p>
-            )}
-            <p>Post professionalism scores for {roster.length} student{roster.length === 1 ? '' : 's'} on &quot;{entry.name}&quot;, and zero absent students{entry?.journalAssignmentId ? ' (locking their journal)' : ''}?</p>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              {commentsOn
-                ? 'Flag summaries and your typed comments post as submission comments (an identical comment is not posted twice).'
-                : 'Your typed comments post as submission comments. Flag summaries are off — turn on "Send deduction reasons as a submission comment" in Course Settings to include them.'}
+            <p>
+              This puts Canvas back the way it was before your commit at {fmtWhen(stored.lastCommit.at)} for{' '}
+              {revertCount(stored)} student{revertCount(stored) === 1 ? '' : 's'}:
+              scores and excused marks restored, comments it posted deleted, and journal locks it added removed (or ones it removed put back).
             </p>
-            <p>This changes real grades in Canvas.</p>
+            <p>Your grading from that commit comes back as a draft, so you can fix it and commit again.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">If a score was changed in Canvas by hand since, Revert overwrites it with the value from before the commit.</p>
           </div>
           {saving && progress && <p className="text-xs text-[var(--color-text-muted)] mt-2">{progress}</p>}
         </Modal>
@@ -510,7 +600,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
           {!absent && (
             <Chip tone="exceeded" active={!!st.exceeded}
               onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
-              title={`Mark this student as exceeding expectations (${maxScore})`}>Exceeds</Chip>
+              title="Mark this student as exceeding expectations (a true 4)">Exceeds</Chip>
           )}
           {absent && (
             <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -660,35 +750,6 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
   )
 }
 
-// One submission comment body: the flag summary (only when the course setting is
-// on) plus any free-text comment. Deterministic, so an unchanged commit produces
-// the same string and can be skipped as a duplicate.
-function buildComment(section, studentId, score, includeFlags, byId = FLAG_BY_ID) {
-  const st = section.students[studentId]
-  if (!st) return ''
-  const parts = []
-  if (includeFlags) {
-    const kitchen = st.kitchen != null ? section.kitchens[st.kitchen] : null
-    const kitchenLabels = (kitchen?.flagIds ?? []).map(id => byId[id]?.label).filter(Boolean)
-    const indivLabels = (st.flagIds ?? []).map(id => byId[id]?.label).filter(Boolean)
-    if (st.exceeded && indivLabels.length === 0) {
-      parts.push(`Professionalism: ${score}/4 — Exceeded expectations`)
-    } else if (kitchenLabels.length || indivLabels.length) {
-      const lines = [`Professionalism: ${score}/4`]
-      if (kitchenLabels.length) lines.push(`Kitchen: ${kitchenLabels.join(', ')}`)
-      if (indivLabels.length) lines.push(`Individual: ${indivLabels.join(', ')}`)
-      parts.push(lines.join('\n'))
-    }
-  }
-  for (const lib of (st.libraryComments ?? [])) {
-    const t = lib.trim()
-    if (t) parts.push(t)
-  }
-  const free = (st.comment ?? '').trim()
-  if (free) parts.push(free)
-  return parts.join('\n\n')
-}
-
 // Highest kitchen number referenced by either stored slot, floored at the default
 // so a fresh lab shows the full set of kitchen cards.
 function maxKitchen(...sectionsMaybe) {
@@ -712,4 +773,84 @@ function fmtWhen(iso) {
   } catch {
     return 'earlier'
   }
+}
+
+// Canvas's state for each student's professionalism submission.
+function profStateFrom(subs) {
+  return Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused, comments: s.comments ?? [] }]))
+}
+
+const revertCount = stored => Object.keys(stored?.lastCommit?.record?.students ?? {}).length
+
+// Period picker label: a check when the period is committed with nothing
+// unsaved since, a dot when it has unsaved edits.
+function periodLabel(name, status) {
+  if (status === 'done') return `✓ ${name}`
+  if (status === 'draft') return `• ${name} (unsaved edits)`
+  return name
+}
+
+// The commit preview: exactly what will be sent, from the commit plan.
+function CommitPreview({ preview, presentUnassigned, entry }) {
+  if (!preview) {
+    return <p className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]"><Loader size={14} className="animate-spin" />Checking Canvas…</p>
+  }
+  if (preview.error) {
+    return <p className="text-sm text-[var(--color-error)]">Couldn't read Canvas to build the preview: {preview.error}</p>
+  }
+  const { students, summary } = preview.plan
+  const scoreLine = Object.entries(summary.scoreCounts).sort((a, b) => Number(b[0]) - Number(a[0])).map(([v, n]) => `${v} ×${n}`).join(', ')
+  const changing = students.filter(s => s.ops.length)
+  const statusText = s => s.status === 'excused' ? 'Excused (Canvas excused)'
+    : s.status === 'absent' ? `Absent — 0${entry.journalAssignmentId ? ', journal locked' : ''}`
+      : s.returning ? `${s.score} — back from absent (journal reopened)` : String(s.score)
+
+  return (
+    <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
+      {summary.writes === 0 ? (
+        <p className="text-[var(--color-text-body)]">Canvas already matches this period — nothing to send.</p>
+      ) : (
+        <ul className="space-y-0.5 text-[var(--color-text-body)]">
+          {summary.scoresPosted > 0 && <li><strong>{summary.scoresPosted}</strong> score{summary.scoresPosted === 1 ? '' : 's'}: {scoreLine}</li>}
+          {summary.comments > 0 && <li><strong>{summary.comments}</strong> comment{summary.comments === 1 ? '' : 's'}</li>}
+          {summary.absent > 0 && <li><strong>{summary.absent}</strong> absent (zero{entry.journalAssignmentId ? ', journal locked' : ''})</li>}
+          {summary.excused > 0 && <li><strong>{summary.excused}</strong> excused (Canvas excused — doesn't count against the grade)</li>}
+          {summary.returning > 0 && <li><strong>{summary.returning}</strong> back from absent (journal zero cleared, lock removed)</li>}
+          {summary.unchanged > 0 && <li className="text-[var(--color-text-muted)]">{summary.unchanged} already up to date — skipped</li>}
+        </ul>
+      )}
+      {summary.blocked > 0 && (
+        <p className="flex items-start gap-1.5 text-[var(--color-error)]">
+          <XCircle size={15} className="mt-0.5 shrink-0" />
+          {summary.blocked} student{summary.blocked === 1 ? '' : 's'} won't be sent — a safety check caught a problem (see the list below).
+        </p>
+      )}
+      {presentUnassigned > 0 && (
+        <p className="flex items-start gap-1.5 text-[var(--color-warning)]">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          {presentUnassigned} present student{presentUnassigned === 1 ? '' : 's'} {presentUnassigned === 1 ? 'has' : 'have'} no kitchen — they score as a clean kitchen.
+        </p>
+      )}
+      {changing.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-[var(--color-text-body)]">See each student ({changing.length})</summary>
+          <ul className="mt-2 max-h-72 overflow-y-auto divide-y divide-[var(--color-border-subtle)]">
+            {changing.map(s => (
+              <li key={s.userId} className="py-1.5">
+                <div className="flex justify-between gap-3">
+                  <span className="text-[var(--color-text-body)]">{s.userName}</span>
+                  <span className={s.blocked ? 'text-[var(--color-error)]' : 'text-[var(--color-text-secondary)]'}>{statusText(s)}</span>
+                </div>
+                {s.comment && <p className="text-xs whitespace-pre-wrap text-[var(--color-text-muted)] mt-0.5">“{s.comment}”</p>}
+                {s.checks.map(c => (
+                  <p key={c.rule} className={`text-xs ${c.level === 'block' ? 'text-[var(--color-error)]' : 'text-[var(--color-warning)]'}`}>{c.level === 'block' ? 'Not sent' : 'Check'}: {c.message}</p>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <p>This changes real grades in Canvas. You can revert this commit afterwards.</p>
+    </div>
+  )
 }

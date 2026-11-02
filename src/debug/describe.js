@@ -3,12 +3,10 @@
 
 // The kinds of write the app's screens can actually make, in the order the
 // report's coverage checklist shows them, with how to trigger each. "Test
-// everything" = every one of these lit up. Writes the API layer supports but
-// no screen uses (update assignment, assignment-group update/delete, excuse,
-// clearing a score, removing an override — the last two only lived in the
-// unwired AttendancePanel) are left out, and sync is paused in debug mode.
-// describeWrite still labels them if they ever appear. Add a row here when a
-// screen gains a new kind of write.
+// everything" = every one of these lit up. Writes the API layer supports but no
+// screen uses (update assignment, assignment-group update/delete) are left out,
+// and sync is paused in debug mode; describeWrite still labels them if they
+// ever appear. Add a row here when a screen gains a new kind of write.
 export const COVERAGE = [
   ['assignment-create', 'Create assignment', 'Create a pairing or standalone, or push a Unit/Term score whose assignment doesn’t exist yet'],
   ['override-create', 'Create due date / lock', 'Create a pairing with lab dates, or commit a period with a student marked absent (locks their journal)'],
@@ -18,6 +16,10 @@ export const COVERAGE = [
   ['grade-post', 'Post a score', 'Commit a period, or push Unit/Term scores'],
   ['grade-zero', 'Post an absence zero', 'Commit a period with a student marked absent'],
   ['comment', 'Post a comment', 'Commit a period with a comment, a library comment, or (if on) flag summaries'],
+  ['excuse', 'Excuse (Canvas excused)', 'Commit a period with a student marked absent and Excused'],
+  ['grade-clear', 'Clear a score', 'Flip a committed absent student back to Present and recommit (clears their journal zero), or revert a commit'],
+  ['override-delete', 'Remove a journal lock', 'Flip a committed absent student back to Present and recommit, or revert a commit'],
+  ['comment-delete', 'Delete a comment', 'Revert a commit that posted a comment'],
   ['assignment-delete', 'Delete assignment', 'Course settings › Clear setup, choosing to delete the pairings'],
 ]
 
@@ -25,6 +27,7 @@ const ID = '(\\d+|debug-\\d+)'
 const route = (re, method) => ({ re: new RegExp(`^/api/v1${re}$`), method })
 const ROUTES = {
   submission:  route(`/courses/${ID}/assignments/${ID}/submissions/${ID}`, 'PUT'),
+  subComment:  route(`/courses/${ID}/assignments/${ID}/submissions/${ID}/comments/${ID}`, 'DELETE'),
   override:    route(`/courses/${ID}/assignments/${ID}/overrides(?:/${ID})?`),
   assignment:  route(`/courses/${ID}/assignments(?:/${ID})?`),
   moduleItem:  route(`/courses/${ID}/modules/${ID}/items`),
@@ -38,6 +41,11 @@ const quote = s => (s ? `“${s}”` : null)
 export function describeWrite({ method, path, body = {}, context = {} }) {
   const m = re => path.match(re)
   let hit
+
+  if ((hit = m(ROUTES.subComment.re)) && method === 'DELETE') {
+    const who = context.studentName ?? `student ${hit[3]}`
+    return { text: `Delete a comment for ${who} on ${context.assignmentLabel ? quote(context.assignmentLabel) : `assignment ${hit[2]}`}`, categories: ['comment-delete'] }
+  }
 
   if ((hit = m(ROUTES.submission.re)) && method === 'PUT') {
     const [, , assignmentId, userId] = hit
@@ -56,7 +64,8 @@ export function describeWrite({ method, path, body = {}, context = {} }) {
         categories.push(zero ? 'grade-zero' : 'grade-post')
       }
     }
-    if (sub.excuse) { parts.push('Excuse'); categories.push('excuse') }
+    if (sub.excuse === true) { parts.push('Excuse'); categories.push('excuse') }
+    if (sub.excuse === false) { parts.push('Un-excuse'); categories.push('excuse') }
     if (comment !== undefined) { parts.push(parts.length ? '+ comment' : 'Post a comment'); categories.push('comment') }
     return { text: `${parts.join(' ') || 'Update submission'} for ${who} on ${what}`, categories }
   }

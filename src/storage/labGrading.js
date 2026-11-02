@@ -18,9 +18,15 @@
 //     committedAt: isoString | null,
 //     draft:       { kitchens, students } | null,
 //     updatedAt:   isoString | null,   // last draft edit (for the "from <time>" prompt)
+//     lastCommit:  { at, record, prevCommitted, prevCommittedAt } | null,
+//                  // what the most recent commit changed in Canvas, so it can be
+//                  // reverted (pages/labs/commitRun.js). The record holds each
+//                  // student's prior score/excused state by Canvas id — it syncs to
+//                  // the teacher's own Canvas custom data, like the flags.
 //   }
 // A section object: { kitchens: { [kitchenNo]: { flagIds, exceeded } },
-//                     students: { [studentId]: { kitchen, flagIds, present } } }
+//                     students: { [studentId]: { kitchen, flagIds, present, excused,
+//                                               exceeded, comment, libraryComments } } }
 
 import { kvGet, kvSet, kvRemove } from './kv.js'
 import { countKitchenSeverities, individualPenalty, FLAG_BY_ID } from '../config/labFlags.js'
@@ -71,11 +77,50 @@ export async function saveDraft(labId, sectionId, section) {
   return putState(labId, sectionId, { ...prev, draft: section, updatedAt: new Date().toISOString() })
 }
 
-// Record a successful push: the working section becomes the committed set and the
-// draft is cleared, so the section reads as saved until the next edit.
-export async function commitLabGrading(labId, sectionId, section) {
+// Record a push: the working section becomes the committed set. Normally the
+// draft is cleared so the section reads as saved until the next edit; after a
+// partly failed commit (`keepDraft`) the draft stays, so the period still shows
+// unsaved work and the resume prompt offers a retry. `record` (from runCommit)
+// is kept as lastCommit for Revert, with the previous committed set to go back to.
+export async function commitLabGrading(labId, sectionId, section, { record = null, keepDraft = false } = {}) {
+  const prev = await getLabGrading(labId, sectionId)
   const now = new Date().toISOString()
-  return putState(labId, sectionId, { committed: section, committedAt: now, draft: null, updatedAt: now })
+  return putState(labId, sectionId, {
+    committed: section,
+    committedAt: now,
+    draft: keepDraft ? section : null,
+    updatedAt: now,
+    lastCommit: record ? { at: now, record, prevCommitted: prev.committed ?? null, prevCommittedAt: prev.committedAt ?? null } : null,
+  })
+}
+
+// After Canvas has been put back (runRevert): the committed set goes back to what
+// it was before that commit, and the reverted work comes back as a draft so the
+// teacher can fix it and commit again. Revert is one step: lastCommit is cleared.
+export async function revertLabGrading(labId, sectionId) {
+  const prev = await getLabGrading(labId, sectionId)
+  const lc = prev.lastCommit
+  if (!lc) return prev
+  return putState(labId, sectionId, {
+    committed: lc.prevCommitted,
+    committedAt: lc.prevCommittedAt,
+    draft: prev.committed,
+    updatedAt: new Date().toISOString(),
+    lastCommit: null,
+  })
+}
+
+// Status of every period of a lab, for the checkmarks in the period picker:
+// 'done' — committed and no unsaved edits since; 'draft' — unsaved edits; or absent.
+export async function getPeriodStatuses(labId) {
+  const lab = await readLab(labId)
+  return Object.fromEntries(Object.entries(lab).map(([sectionId, st]) => [sectionId, periodStatus(st)]))
+}
+
+export function periodStatus(state) {
+  if (state?.draft) return 'draft'
+  if (state?.committed) return 'done'
+  return null
 }
 
 // Drop the draft, keeping the last committed set (what "discard" does).

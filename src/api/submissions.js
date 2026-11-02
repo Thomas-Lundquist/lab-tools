@@ -1,4 +1,4 @@
-import { canvasGetAll, canvasPut } from './request.js'
+import { canvasGetAll, canvasPut, canvasDelete } from './request.js'
 import { checkGradeWrite } from '../debug/checks.js'
 
 // Returns all assignments for a course enriched with submission_summary counts.
@@ -57,6 +57,11 @@ export async function updateSubmissionGrade(courseId, assignmentId, userId, fiel
   )
 }
 
+// Delete one submission comment (revert removes a comment a commit posted).
+export async function deleteSubmissionComment(courseId, assignmentId, userId, commentId, context = {}) {
+  await canvasDelete(`/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}/comments/${commentId}`, context)
+}
+
 function mapAssignmentWithGrading(raw) {
   const s = raw.submission_summary
   return {
@@ -98,5 +103,7 @@ function mapSubmission(raw) {
     // Present only when requested with include[]=submission_comments. The comment
     // bodies already on the submission — used to avoid re-posting an identical one.
     comments:      raw.submission_comments ? raw.submission_comments.map(c => c.comment) : [],
+    // Same comments with their ids — revert deletes the exact comment a commit posted.
+    commentItems:  raw.submission_comments ? raw.submission_comments.map(c => ({ id: String(c.id), comment: c.comment })) : [],
   }
 }

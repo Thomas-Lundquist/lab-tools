@@ -98,3 +98,19 @@ An extension's storage is isolated from arbitrary page scripts by the browser; a
 
 **2026-11-02 — Individual flags get Minor/Major too, weighted like kitchen flags.**
 The teacher wanted the two kinds consistent, and asked to keep the kitchen model. Read as: a Major counts as two Minors. So an individual Minor drops the student one tier below their kitchen's score, a Major two, never below 1 (`individualPenalty` in `config/labFlags.js`). Every built-in individual flag is Minor. A saved flag with no severity, or a removed one, also counts as Minor — exactly the old one-tier rule — so already-graded labs keep their scores. *Not done:* pooling a student's own flags into their kitchen's threshold count. That reading would have changed committed scores (kitchen 2 + one individual Minor would become 2, not 1).
+
+**2026-11-02 — Lab tab commit rebuilt around a plan: preview, Canvas-excused absences, revert, period checkmarks. Fixes from a code review.**
+- *One plan, previewed and then run* (`pages/labs/commitPlan.js`, pure and tested). It reads Canvas fresh — professionalism scores, excused states and comments, the journal's, and existing journal locks — then decides each student's writes. "Commit Period…" shows that plan before anything is sent: scores by value, comments, absences, excused, students back from absent, students skipped as already up to date, and any blocked by a safety check, with a per-student list. The commit then runs the same plan (`commitRun.js`), re-reading Canvas first.
+- *Recommits only send what changed.* An absence already zeroed and locked is left alone. Before, every recommit made a duplicate journal lock that Canvas rejects, so each absent student failed every time.
+- *Absent → Present now undoes the absence:* the journal zero is cleared (or un-excused) and the lock removed. This only happens for students committed absent last time, so a real journal 0 is never touched.
+- *Excused uses Canvas's own excused* on professionalism and the journal (teacher's request), replacing "zero + an 'Excused absence' comment". An old journal lock is removed. Absent and excused students never get the kitchen's flag summary as a comment.
+- *Revert* (teacher's request). Each commit stores, per student, what Canvas held before (`lastCommit` in `storage/labGrading.js`). "Revert last commit" restores scores and excused states, deletes the exact comment it posted, removes a lock it created (or recreates one it removed), and turns the reverted grading back into a draft. It covers one step only, the most recent commit of a period, and overwrites any hand edit made in Canvas since.
+- *Period checkmarks.* The period picker shows ✓ for a committed period with nothing unsaved, and • for unsaved edits.
+- *Other review fixes:*
+  - Resuming or reopening a period kept only kitchen, flags, present and excused, so Exceeds and comments were silently dropped (and Exceeds students then posted the soft top). It now keeps every field.
+  - A slower load for a period already left could overwrite the screen and autosave into the wrong period. Loads are now cancelled when you switch.
+  - A partly failed commit used to clear the draft; it now keeps it and names the students that failed.
+  - A pending autosave could land after a commit and resurrect a draft. It's now cancelled.
+  - The Exceeded chip showed the soft top but posts a true 4; it now says 4.
+  - Unit/Term: the Unassigned group can't be pushed, which had created a stray "Unassigned … (Unit Score)" assignment. Pushed unit scores now feed the Term rollup without a reload.
+- *Install page:* iPad one-tap is via a Shortcuts "Open URLs" icon or an edited Safari Favorite, because Canvas's manifest stops Add to Home Screen from targeting `/labtools`. The teacher confirmed one-tap works.

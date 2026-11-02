@@ -44,7 +44,12 @@
             <li><button id="download-userscript" class="btn-secondary text-xs" type="button">Download script</button> — saves <code>labtools.user.js</code> to Files › Downloads; in the Files app, move it into your Userscripts folder.</li>
           </ul>
         </li>
-        <li>In Safari, open <code id="launch-url"></code> and add it to your Home Screen or bookmarks. If the Add to Home Screen sheet shows <strong>Open as Web App</strong>, turn it off — the extension only runs in Safari itself. That opens Lab Tools in one tap.</li>
+        <li>For one tap: Safari's <strong>Add to Home Screen</strong> can't point at this page (Canvas sends it to the dashboard), so use either
+          <ul class="list-disc list-inside ml-5 mt-1 space-y-1">
+            <li><strong>Shortcuts</strong> app: new shortcut › <em>Open URLs</em> › <code id="launch-url"></code> › name it Lab Tools › <em>Add to Home Screen</em>; or</li>
+            <li>a Safari <strong>Favorite</strong>: add any page to Favorites, then edit it — name it Lab Tools and set the address above.</li>
+          </ul>
+        </li>
       </ol>
       <p class="text-xs text-[var(--color-text-muted)]">On a laptop with Tampermonkey, paste the script into a new script instead: <button id="copy-userscript" class="btn-secondary text-xs ml-1" type="button">Copy script</button></p>
       <pre id="userscript" class="text-xs bg-[var(--color-bg-hover)] rounded-lg p-3 overflow-x-auto"></pre>

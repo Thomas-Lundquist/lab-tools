@@ -38,13 +38,16 @@ function Confirm({ message, onConfirm, onCancel, busy, progress }) {
   )
 }
 
+// Labs with no Module fall into this group; it can be viewed but never pushed.
+const UNASSIGNED = 'Unassigned'
+
 // One rollup level (Unit-from-Labs or Term-from-Units): tabs across groups,
 // a per-student score table, and a push-to-Canvas action per group. Both
 // levels feed the same generic scoreUnit() — only what counts as an "item"
 // and what the group names mean (Modules vs Terms) differs.
 function RollupSection({
   label, items, assign, students, submissionsByStudent,
-  courseId, courseName, postToSis, scoreAssignmentSuffix, existingAssignments, onAssignmentCreated,
+  courseId, courseName, postToSis, scoreAssignmentSuffix, existingAssignments, onAssignmentCreated, onScoresPushed,
 }) {
   const toast = useToast()
   const { requirePin } = usePinGate()
@@ -130,12 +133,14 @@ function RollupSection({
     }
 
     const toPush = rows.filter(x => x.r.value !== null)
+    const pushed = []
     let done = 0, failed = 0
     for (const { student, r } of toPush) {
       try {
         await updateSubmissionGrade(courseId, target.id, student.userId, { posted_grade: String(r.value) }, {
           studentName: student.userName, assignmentLabel: target.name ?? title, kind: 'unit',
         })
+        pushed.push({ userId: student.userId, score: r.value })
       } catch {
         failed++
       }
@@ -143,6 +148,10 @@ function RollupSection({
       setProgress(`${done} of ${toPush.length} updated…`)
     }
 
+    // The scores just posted feed the next level up (a Unit score into its
+    // Term) — without this, a just-created unit assignment reads as blank there
+    // until the page reloads, and a Term push would leave it out.
+    onScoresPushed?.(target.id, pushed)
     setPushing(false)
     setConfirm(null)
     setProgress('')
@@ -151,6 +160,12 @@ function RollupSection({
   }
 
   function openConfirm() {
+    // Labs with no Module have no unit to score; pushing would create a stray
+    // "Unassigned … (Unit Score)" assignment in the gradebook.
+    if (active === UNASSIGNED) {
+      toast("Assign these labs to a Module (Unit) first — the Unassigned group can't be pushed.", 'warning')
+      return
+    }
     if (incompleteLabs.length) {
       toast(`Grade every lab in ${active} first. Not graded yet: ${incompleteLabs.join(', ')}.`, 'warning')
       return
@@ -217,7 +232,7 @@ function RollupSection({
             )}
 
             <div className="flex items-center gap-3">
-              <Button icon={Send} onClick={openConfirm} disabled={!rows.length || incompleteLabs.length > 0}>Push Grades to Canvas</Button>
+              <Button icon={Send} onClick={openConfirm} disabled={!rows.length || incompleteLabs.length > 0 || active === UNASSIGNED}>Push Grades to Canvas</Button>
               <Button variant="secondary" icon={Copy} onClick={() => setShowCopy(s => !s)}>
                 {showCopy ? 'Hide spreadsheet column' : 'Copy as spreadsheet column instead'}
               </Button>
@@ -368,13 +383,13 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
     const map = {}
     for (const a of professionalismAssignments) {
       const entry = entriesByAssignmentId[a.id]
-      map[a.id] = (entry?.moduleId && moduleNameById[entry.moduleId]) || 'Unassigned'
+      map[a.id] = (entry?.moduleId && moduleNameById[entry.moduleId]) || UNASSIGNED
     }
     return map
   }, [professionalismAssignments, entriesByAssignmentId, moduleNameById])
 
   const unassignedCount = useMemo(
-    () => professionalismAssignments.filter(a => unitAssign[a.id] === 'Unassigned').length,
+    () => professionalismAssignments.filter(a => unitAssign[a.id] === UNASSIGNED).length,
     [professionalismAssignments, unitAssign],
   )
 
@@ -396,6 +411,14 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
 
   function handleAssignmentCreated(created) {
     setAssignments(prev => [...prev, created])
+  }
+
+  function handleScoresPushed(assignmentId, pushed) {
+    setSubmissionsByStudent(prev => {
+      const next = { ...prev }
+      for (const { userId, score } of pushed) next[userId] = { ...next[userId], [assignmentId]: { score, excused: false } }
+      return next
+    })
   }
 
   if (loading || loadingCourse) {
@@ -445,6 +468,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
           scoreAssignmentSuffix="Professionalism (Unit Score)"
           existingAssignments={assignments}
           onAssignmentCreated={handleAssignmentCreated}
+          onScoresPushed={handleScoresPushed}
         />
       </div>
 
@@ -462,6 +486,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
           scoreAssignmentSuffix="Professionalism (Term Score)"
           existingAssignments={assignments}
           onAssignmentCreated={handleAssignmentCreated}
+          onScoresPushed={handleScoresPushed}
         />
       </div>
     </div>
