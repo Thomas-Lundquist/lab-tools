@@ -50,10 +50,23 @@ async function executeRequest({ url, method, body }) {
   }
 
   if (!response.ok) {
-    throw new ApiError(`Request failed: ${response.status} ${response.statusText}`, response.status)
+    const detail = await canvasErrorMessage(response)
+    const err = new ApiError(`Request failed: ${response.status} ${response.statusText}${detail ? ` (${detail})` : ''}`, response.status)
+    err.canvasMessage = detail
+    throw err
   }
 
   return response
+}
+
+// Canvas explains most failures in the body: { message } or { errors: [{ message }] }.
+export async function canvasErrorMessage(response) {
+  try {
+    const body = JSON.parse((await response.text()).replace(/^while\(1\);/, ''))
+    return body?.message ?? body?.errors?.[0]?.message ?? (typeof body?.errors === 'string' ? body.errors : null)
+  } catch {
+    return null
+  }
 }
 
 // Session-authenticated Canvas JSON can be prefixed with `while(1);` (a JSON

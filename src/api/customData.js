@@ -1,5 +1,5 @@
 import { canvasGet, canvasPut, canvasDelete } from './request.js'
-import { NotFoundError } from './errors.js'
+import { NotFoundError, ApiError } from './errors.js'
 
 // Canvas custom data: a per-user JSON store inside Canvas itself, used to sync
 // this app's settings and grading drafts across the teacher's devices (see
@@ -10,20 +10,28 @@ import { NotFoundError } from './errors.js'
 // (`setup`, `labGrading/<labId>`). Strings round-trip exactly; nested JSON
 // sent as request params can come back with numbers, booleans, empty arrays,
 // and nulls changed by Canvas's parameter parsing.
+//
+// "Nothing there" has two answers in Canvas: 404 when the namespace has never
+// been written, and 400 ("no data for scope") when the namespace exists but
+// that path doesn't. Reads treat both as missing. Sync never deletes local data
+// because of a missing document (it re-uploads instead), and a 400 that means
+// something else resurfaces on the upload that follows.
 
 export const NAMESPACE = 'org.labtools'
 const ROOT = '/api/v1/users/self/custom_data'
 
 const docUrl = docPath => `${ROOT}/${docPath.split('/').map(encodeURIComponent).join('/')}`
 
-// Every document in the namespace, as { docPath: jsonString }. An empty
-// namespace is a 404 in Canvas; that's just "nothing synced yet".
+export const isMissing = err =>
+  err instanceof NotFoundError || (err instanceof ApiError && err.statusCode === 400)
+
+// Every document in the namespace, as { docPath: jsonString }.
 export async function getAllDocs() {
   try {
     const res = await canvasGet(ROOT, { ns: NAMESPACE })
     return flattenDocs(res?.data)
   } catch (err) {
-    if (err instanceof NotFoundError) return {}
+    if (isMissing(err)) return {}
     throw err
   }
 }
@@ -34,13 +42,15 @@ export async function getDoc(docPath) {
     const res = await canvasGet(docUrl(docPath), { ns: NAMESPACE })
     return typeof res?.data === 'string' ? res.data : undefined
   } catch (err) {
-    if (err instanceof NotFoundError) return undefined
+    if (isMissing(err)) return undefined
     throw err
   }
 }
 
+// ns rides in the query string as well as the body, matching the
+// proof-of-concept request that worked on the iPad.
 export async function putDoc(docPath, jsonString) {
-  await canvasPut(docUrl(docPath), { ns: NAMESPACE, data: jsonString })
+  await canvasPut(`${docUrl(docPath)}?ns=${NAMESPACE}`, { ns: NAMESPACE, data: jsonString })
 }
 
 // Deletes the whole namespace — every synced document.
@@ -48,7 +58,7 @@ export async function deleteAllDocs() {
   try {
     await canvasDelete(`${ROOT}?ns=${NAMESPACE}`)
   } catch (err) {
-    if (!(err instanceof NotFoundError)) throw err
+    if (!isMissing(err)) throw err
   }
 }
 
