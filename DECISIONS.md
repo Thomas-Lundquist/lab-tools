@@ -89,3 +89,9 @@ An extension's storage is isolated from arbitrary page scripts by the browser; a
 - *Diagnostics log.* The last 50 failures on this device are kept locally and never synced, including the per-student failures the commit loop used to swallow silently.
 - *Copy for Claude strips student data* (teacher's choice): names, student ids, well-formed scores, and comment text are replaced. Broken values are kept, since they're the bug. Pasting into a chat sends the text to Anthropic, which is outside the district's systems.
 - *Toasts:* timings unchanged; the teacher confirmed the current behavior is intentional. Pause-on-hover now responds to a real mouse only, so an iPad tap can't freeze a toast.
+
+**2026-11-02 — One source of truth for deductions and the comment bank: the main Settings page (Grading card). Grading policy stays per course.**
+- *Deductions are the lab flags*, already one global list. They stay as two kinds, kitchen (Minor/Major, scored together for the whole kitchen) and individual (each drops one student a tier), because they score differently. The teacher confirmed keeping them separate.
+- *Removed* the per-course "Deduction reasons" and "Deduction scoring" settings. They only fed the unwired `ScorePanel` (the old deduction model), so editing them did nothing.
+- *The comment bank is global* (`setup.commentLibrary`, `getCommentBank`/`saveCommentBank`). Until it's first edited, it reads as every course's old `settings.commentLibrary` merged, in first-seen order without duplicates, so nothing is lost.
+- *Kept per course* (teacher's choice): top score, zero journal when absent, send flag summary as a comment, journal due/close offsets, the Focus sync toggles, and the course's own structure (A/B sections, Terms).

@@ -14,7 +14,7 @@ import { getSections } from '../../api/sections.js'
 import { getEnrollments } from '../../api/enrollments.js'
 import { getAssignmentSubmissions, updateSubmissionGrade } from '../../api/submissions.js'
 import { getOverrides } from '../../api/overrides.js'
-import { getCourseSetup, getLabs, isStandalone, getFlags } from '../../storage/setup.js'
+import { getCourseSetup, getLabs, isStandalone, getFlags, getCommentBank } from '../../storage/setup.js'
 import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
   getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft,
@@ -46,6 +46,10 @@ function buildSection(roster, prior, profScores) {
   return { kitchens: prior?.kitchens ?? {}, students }
 }
 
+// Stable empty list for the comment bank before it loads, so memoized rows
+// don't see a new array every render.
+const EMPTY = []
+
 export default function KitchenScorePanel({
   courseId, courseName, loadingCourse, ready, setupVersion,
   labId, sectionId, onSelect, onChanged, onGoToSetup, onGoToLabs,
@@ -58,6 +62,7 @@ export default function KitchenScorePanel({
   const [sections, setSections]       = useState([])
   const [courseSetup, setCourseSetup] = useState(null)
   const [flags, setFlags]             = useState(null) // global flag definitions; null -> built-in defaults
+  const [commentLibrary, setCommentLibrary] = useState(EMPTY) // global comment bank (Settings › Grading)
   const [profOverrides, setProfOverrides] = useState(null)
 
   const [rosterLoading, setRosterLoading] = useState(false)
@@ -82,8 +87,8 @@ export default function KitchenScorePanel({
     setLoading(true)
     // getFlags is global (not course-scoped) but is cheap and lives here so the
     // picker/scoring always see the teacher's latest edits on a course switch.
-    Promise.all([getLabs(courseId), getSections(courseId), getCourseSetup(courseId), getFlags()])
-      .then(([labs, secs, setup, f]) => { setEntries(labs); setSections(secs); setCourseSetup(setup); setFlags(f) })
+    Promise.all([getLabs(courseId), getSections(courseId), getCourseSetup(courseId), getFlags(), getCommentBank()])
+      .then(([labs, secs, setup, f, bank]) => { setEntries(labs); setSections(secs); setCourseSetup(setup); setFlags(f); setCommentLibrary(bank) })
       .finally(() => setLoading(false))
   }, [courseId, setupVersion])
 
@@ -219,16 +224,11 @@ export default function KitchenScorePanel({
     )
   }
 
-  // Reference-stable comment library (an inline `?? []` mints a new array each
-  // render and re-renders every memoized StudentRow). MUST stay above the early
-  // returns below — a hook called after a conditional return changes the per-render
-  // hook count and crashes the component (this is what blanked the Lab tab).
-  const commentLibrary = useMemo(() => courseSetup?.settings?.commentLibrary ?? [], [courseSetup])
-
   // Resolved flag config: the teacher's global list (or the built-in defaults
   // until they edit), split into the pickers' option lists plus an id->flag map
-  // for labels/severity. MUST stay above the early returns below (same reason as
-  // commentLibrary) — a hook after a conditional return blanks the component.
+  // for labels/severity. MUST stay above the early returns below — a hook called
+  // after a conditional return changes the per-render hook count and crashes the
+  // component (this is what once blanked the Lab tab).
   const { byId, kitchen: kitchenFlagOptions, individual: individualFlagOptions } =
     useMemo(() => flagIndex(resolveFlags(flags)), [flags])
 

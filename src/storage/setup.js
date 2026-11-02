@@ -19,15 +19,16 @@ const STORAGE_KEY = 'setup'
 export const DEFAULT_SETTINGS = {
   syncLabsToFocus: false,       // per-lab professionalism assignments -> Focus (SIS)
   syncUnitTermToFocus: true,    // unit/term score assignments -> Focus (SIS)
-  deductionReasons: ['Dishes left in sink', 'Station not wiped', 'Equipment put away wet', 'Off task'],
-  commentLibrary: [],           // reusable feedback comments, pickable per student in the Lab tab
+  // Deductions are the global lab flags (getFlags) and the comment bank is
+  // global too (getCommentBank) — both edited on the main Settings page. The old
+  // per-course deductionReasons / deductionPointsPerStep / deductionMarksPerStep
+  // only fed the unwired ScorePanel and were removed; per-course commentLibrary
+  // is read once, to seed the global bank.
   maxScore: 4,                  // value a top (perfect) lab posts; caps only the top tier, lower tiers unchanged
-  sendDeductionReasonsAsComment: false,
+  sendDeductionReasonsAsComment: false, // post a flag summary with each score
   zeroJournalWhenAbsent: true,
   journalDueOffsetDays: 1,      // Journal due date = lab date + this many days
   labCloseDateOffsetDays: 14,   // Journal close date = Journal due date + this many days
-  deductionPointsPerStep: 1,    // ScoringPanel's deduction formula: score = max(0, 4 - ceil(markCount / marksPerStep) * pointsPerStep)
-  deductionMarksPerStep: 2,
 }
 
 const DEFAULT_COURSE = {
@@ -183,4 +184,27 @@ export async function saveFlags(flags) {
   setup.flags = flags
   await saveSetup(setup)
   return flags
+}
+
+// ---- Comment bank ----
+// Reusable feedback comments, tapped per student in the Lab tab. One list for
+// every course, edited on the main Settings page (Grading card), like the flags.
+// It used to live per course (settings.commentLibrary). Until the first edit,
+// the global list is the merge of every course's old list (first-seen order, no
+// duplicates), so nothing is lost; saving writes the global list.
+
+export function mergeCourseCommentLibraries(courses = {}) {
+  return [...new Set(Object.values(courses).flatMap(c => c?.settings?.commentLibrary ?? []))]
+}
+
+export async function getCommentBank() {
+  const setup = await getSetup()
+  return setup.commentLibrary ?? mergeCourseCommentLibraries(setup.courses)
+}
+
+export async function saveCommentBank(list) {
+  const setup = await getSetup()
+  setup.commentLibrary = list
+  await saveSetup(setup)
+  return list
 }

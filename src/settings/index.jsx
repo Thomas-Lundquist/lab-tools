@@ -15,7 +15,7 @@ import { getCurrentUser } from '../api/auth.js'
 import { canvasOrigin } from '../api/canvasContext.js'
 import { getCourses } from '../api/courses.js'
 import { getPreferences, setPreference } from '../storage/preferences.js'
-import { getFlags, saveFlags } from '../storage/setup.js'
+import { getFlags, saveFlags, getCommentBank, saveCommentBank } from '../storage/setup.js'
 import { DEFAULT_FLAGS } from '../config/labFlags.js'
 import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../security/pin.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
@@ -192,7 +192,58 @@ function CoursesSection() {
 // flag pickers and to score: a saved lab keeps only flag ids, so renaming or
 // re-rating a flag here recomputes past labs. Kitchen flags carry a severity
 // (Minor / Major); individual flags do not (each simply drops one tier).
-function LabFlagsSection() {
+// Reusable feedback tapped per student in the Lab tab. Adds to the submission
+// comment; never changes the score.
+function CommentBank() {
+  const [bank, setBank] = useState(null)
+  const [draft, setDraft] = useState('')
+
+  useEffect(() => { getCommentBank().then(setBank) }, [])
+
+  async function update(next) {
+    setBank(next)
+    await saveCommentBank(next)
+  }
+
+  function add() {
+    const c = draft.trim()
+    setDraft('')
+    if (c && !bank.includes(c)) update([...bank, c])
+  }
+
+  return (
+    <div className="space-y-2 pt-4 border-t border-[var(--color-border-subtle)]">
+      <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Comment bank</h3>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Reusable feedback you can tap on each student in the Lab tab. It's added to the submission comment and doesn't change the score.
+      </p>
+      {!bank ? <Skeleton height="3rem" /> : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {bank.map(c => (
+              <span key={c} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
+                {c}
+                <button onClick={() => update(bank.filter(x => x !== c))} aria-label={`Remove ${c}`} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-body)]">
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            {bank.length === 0 && <span className="text-xs text-[var(--color-text-muted)]">No saved comments yet.</span>}
+          </div>
+          <div className="flex gap-2">
+            <TextField value={draft} onChange={setDraft} placeholder="Add a comment" aria-label="New comment" className="max-w-md flex-1" onKeyDown={e => e.key === 'Enter' && add()} />
+            <Button variant="secondary" size="sm" onClick={add}>Add</Button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Everything that shapes a lab grade, shared by every course: the lab flags
+// (kitchen + individual deductions) and the comment bank. There are no
+// per-course copies of either (DECISIONS.md, 2026-11-02).
+function GradingSection() {
   const [flags, setFlags]     = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -222,9 +273,16 @@ function LabFlagsSection() {
   return (
     <Card className="space-y-5">
       <div>
-        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Lab flags</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Grading</h2>
         <p className="text-sm text-[var(--color-text-muted)]">
-          The checklist you tap when grading a lab, shared across every course. A clean kitchen scores the top;
+          Your lab flags (deductions) and comment bank — one set for every course.
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Lab flags</h3>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          The checklist you tap when grading a lab. A clean kitchen scores the top;
           each kitchen flag lowers the score (a Major counts about twice a Minor), and each individual flag drops
           that one student one tier. Renaming or re-rating a flag also updates labs you have already graded.
         </p>
@@ -281,6 +339,8 @@ function LabFlagsSection() {
           </button>
         </>
       )}
+
+      <CommentBank />
     </Card>
   )
 }
@@ -399,7 +459,7 @@ export default function Settings() {
             <AccountSection />
             <AppearanceSection />
             <CoursesSection />
-            <LabFlagsSection />
+            <GradingSection />
             <SyncSection />
             <SecuritySection />
             <TestingSection />

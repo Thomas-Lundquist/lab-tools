@@ -33,7 +33,7 @@ function ClearSetupConfirm({ courseName, pairings, choice, onChoiceChange, onCan
         <div>
           <h3 className="text-base font-semibold text-[var(--color-error)]">Clear setup for {courseName}?</h3>
           <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-            Resets Enabled, the Professionalism assignment group link, section day types, deduction settings, and
+            Resets Enabled, the Professionalism assignment group link, section day types, grading settings, and
             every Term for this course back to a blank slate. Other courses are not affected.
           </p>
         </div>
@@ -101,8 +101,6 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   const [modules, setModules]         = useState([])
   const [terms, setTerms]             = useState([])
   const [pairings, setPairings]       = useState([])
-  const [newReason, setNewReason]     = useState('')
-  const [newComment, setNewComment]   = useState('')
   const [newTermName, setNewTermName] = useState('')
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -144,25 +142,6 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     onChanged?.()
   }
 
-  function addReason() {
-    const r = newReason.trim()
-    if (!r || setup.settings.deductionReasons.includes(r)) { setNewReason(''); return }
-    updateSettings({ deductionReasons: [...setup.settings.deductionReasons, r] })
-    setNewReason('')
-  }
-
-  function removeReason(r) {
-    updateSettings({ deductionReasons: setup.settings.deductionReasons.filter(x => x !== r) })
-  }
-
-  function addComment() {
-    const c = newComment.trim()
-    const library = setup.settings.commentLibrary ?? []
-    if (!c || library.includes(c)) { setNewComment(''); return }
-    updateSettings({ commentLibrary: [...library, c] })
-    setNewComment('')
-  }
-
   // Clamp to a sane range on blur. 1 is the lowest non-absent tier, so a top
   // below it would invert the scale; 4 is the raw ceiling. Reflect the clamped
   // value back into the field so what shows is what was saved.
@@ -171,10 +150,6 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     const clamped = Number.isFinite(n) ? Math.min(4, Math.max(1, n)) : 4
     updateSettings({ maxScore: clamped })
     setMaxScoreInput(String(clamped))
-  }
-
-  function removeComment(c) {
-    updateSettings({ commentLibrary: (setup.settings.commentLibrary ?? []).filter(x => x !== c) })
   }
 
   async function handleCreateTerm() {
@@ -244,7 +219,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
       : `Cleared setup for ${courseName} (${count} pairing${count === 1 ? '' : 's'} preserved)`
     const warning = deletePairings
       ? `This permanently deletes ${count} Professionalism assignment${count === 1 ? '' : 's'} from Canvas, including any grades already entered on them. This cannot be undone.`
-      : "This resets this course's setup — Enabled, the Professionalism group, section day types, deduction settings, and Terms. Existing pairings and their Canvas assignments are left untouched."
+      : "This resets this course's setup — Enabled, the Professionalism group, section day types, grading settings, and Terms. Existing pairings and their Canvas assignments are left untouched."
     await requirePin(
       { action: 'clear_course_setup', summary, courseId, courseName, warning },
       () => doClearSetup(deletePairings),
@@ -306,7 +281,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
               <input type="checkbox" checked={setup.settings.zeroJournalWhenAbsent} onChange={e => updateSettings({ zeroJournalWhenAbsent: e.target.checked })} />
             </label>
             <label className="flex items-center justify-between gap-3 text-sm">
-              <span>Send deduction reasons to students as a submission comment</span>
+              <span>Send a flag summary to students as a submission comment</span>
               <input type="checkbox" checked={setup.settings.sendDeductionReasonsAsComment} onChange={e => updateSettings({ sendDeductionReasonsAsComment: e.target.checked })} />
             </label>
             <label className="flex items-center justify-between gap-3 text-sm">
@@ -347,70 +322,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
               </label>
             </div>
 
-            <div>
-              <FieldLabel>Deduction reasons</FieldLabel>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {setup.settings.deductionReasons.map(r => (
-                  <span key={r} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
-                    {r}
-                    <button onClick={() => removeReason(r)} aria-label={`Remove ${r}`} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-body)]">
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <TextField value={newReason} onChange={setNewReason} placeholder="Add a reason" className="max-w-xs" onKeyDown={e => e.key === 'Enter' && addReason()} />
-                <Button variant="secondary" size="sm" onClick={addReason}>Add</Button>
-              </div>
-            </div>
-
-            <div>
-              <FieldLabel>Comment library</FieldLabel>
-              <p className="text-xs text-[var(--color-text-muted)] mb-2">
-                Reusable feedback you can tap on each student in the Lab tab. These add to the submission comment but do not change the score.
-              </p>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {(setup.settings.commentLibrary ?? []).map(c => (
-                  <span key={c} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
-                    {c}
-                    <button onClick={() => removeComment(c)} aria-label={`Remove ${c}`} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-body)]">
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-                {(setup.settings.commentLibrary ?? []).length === 0 && (
-                  <span className="text-xs text-[var(--color-text-muted)]">No saved comments yet.</span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <TextField value={newComment} onChange={setNewComment} placeholder="Add a comment" className="max-w-xs" onKeyDown={e => e.key === 'Enter' && addComment()} />
-                <Button variant="secondary" size="sm" onClick={addComment}>Add</Button>
-              </div>
-            </div>
-
-            <div>
-              <FieldLabel>Deduction scoring — how marks turn into a score out of 4</FieldLabel>
-              <p className="text-xs text-[var(--color-text-muted)] mb-2">
-                The first mark always costs a full point; after that, every N additional marks cost one more point.
-              </p>
-              <div className="flex items-center gap-3 text-sm">
-                <span>Points lost per step</span>
-                <TextField
-                  type="number"
-                  value={String(setup.settings.deductionPointsPerStep)}
-                  onChange={v => updateSettings({ deductionPointsPerStep: Math.max(0, parseInt(v, 10) || 0) })}
-                  className="w-16 text-right"
-                />
-                <span>Marks per step (N)</span>
-                <TextField
-                  type="number"
-                  value={String(setup.settings.deductionMarksPerStep)}
-                  onChange={v => updateSettings({ deductionMarksPerStep: Math.max(1, parseInt(v, 10) || 1) })}
-                  className="w-16 text-right"
-                />
-              </div>
-            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Lab flags (deductions) and the comment bank are shared by every course — edit them in Settings › Grading.
+            </p>
           </div>
 
           <div className="space-y-4">
@@ -467,7 +381,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
           <div className="space-y-3 pt-4 border-t border-[var(--color-border)]">
             <h3 className="text-sm font-semibold text-[var(--color-error)]">Danger zone</h3>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Resets this course — Enabled, the Professionalism group, section day types, deduction settings, and
+              Resets this course — Enabled, the Professionalism group, section day types, grading settings, and
               Terms — back to a blank slate. Useful for testing setup from scratch. You'll separately choose whether
               to keep existing pairings or also delete them (and their Canvas assignments) permanently.
             </p>
