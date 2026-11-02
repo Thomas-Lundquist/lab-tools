@@ -85,7 +85,7 @@ export default function PinPrompt({ onVerified, onCancel, warning }) {
             <span className="font-semibold text-[var(--color-text-body)]">{lockoutMinutes} minute{lockoutMinutes !== 1 ? 's' : ''}</span>.
           </p>
           <button onClick={() => setView('reset')} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline">
-            Forgot your PIN? Reset Extension
+            Forgot your PIN? Reset this device
           </button>
         </div>
       </Overlay>
@@ -99,18 +99,18 @@ export default function PinPrompt({ onVerified, onCancel, warning }) {
           <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto" style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning) 15%, var(--color-bg-surface))' }}>
             <AlertTriangle size={28} className="text-[var(--color-warning)]" />
           </div>
-          <h2 className="text-xl font-bold text-[var(--color-text-body)]">Reset Extension</h2>
+          <h2 className="text-xl font-bold text-[var(--color-text-body)]">Reset this device</h2>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            This will permanently delete all your data — templates, change logs,
-            settings, and your API token. You will need to go through setup again.
+            This clears your PIN and this device's activity log, then takes you
+            through setup to choose a new PIN. Your preferences, course setup,
+            and grading drafts are kept in your Canvas account and come back.
           </p>
-          <p className="text-sm font-semibold text-[var(--color-error)]">This cannot be undone.</p>
           <div className="flex gap-3 justify-center pt-2">
             <button onClick={() => setView(attemptsLeft > 0 ? 'pin' : 'lockout')} className="btn-ghost">
               Cancel
             </button>
             <button onClick={handleReset} className="btn-danger">
-              Reset Extension
+              Reset this device
             </button>
           </div>
         </div>

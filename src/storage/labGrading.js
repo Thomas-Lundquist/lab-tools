@@ -10,8 +10,10 @@
 //   - `draft`:     unsaved working edits. Its presence IS "there is saved work";
 //     that triggers the resume/discard prompt on reopen.
 //
-// Shape (localStorage key 'labGrading'):
-//   labGrading[labId][sectionId] = {
+// Stored as one key per lab, `labGrading/<labId>`, because each lab is its own
+// synced document in Canvas custom data (storage/sync.js) — a draft autosave
+// re-sends one lab, not the whole year. Shape of each:
+//   [sectionId] = {
 //     committed:   { kitchens, students } | null,
 //     committedAt: isoString | null,
 //     draft:       { kitchens, students } | null,
@@ -20,11 +22,12 @@
 // A section object: { kitchens: { [kitchenNo]: { flagIds, exceeded } },
 //                     students: { [studentId]: { kitchen, flagIds, present } } }
 
-import { kvGet, kvSet } from './kv.js'
+import { kvGet, kvSet, kvRemove } from './kv.js'
 import { countKitchenSeverities, FLAG_BY_ID } from '../config/labFlags.js'
 import { kitchenScore, studentScore, ABSENT_SCORE } from '../pages/labs/kitchenScoring.js'
 
-const STORAGE_KEY = 'labGrading'
+const LEGACY_KEY = 'labGrading'
+const labKey = labId => `labGrading/${labId}`
 
 export function emptySection() {
   return { kitchens: {}, students: {} }
@@ -34,22 +37,32 @@ export function emptyState() {
   return { committed: null, committedAt: null, draft: null, updatedAt: null }
 }
 
-// ---- persistence (thin localStorage read-modify-write) ----
+// ---- persistence (thin localStorage read-modify-write, one lab at a time) ----
 
-async function readAll() {
-  return (await kvGet(STORAGE_KEY)) ?? {}
+async function readLab(labId) {
+  return (await kvGet(labKey(labId))) ?? {}
 }
 
 async function putState(labId, sectionId, state) {
-  const all = await readAll()
-  all[labId] = { ...(all[labId] ?? {}), [sectionId]: state }
-  await kvSet(STORAGE_KEY, all)
+  const lab = await readLab(labId)
+  await kvSet(labKey(labId), { ...lab, [sectionId]: state })
   return state
 }
 
+// Before sync, every lab lived under one 'labGrading' key. Split it into
+// per-lab keys once; the writes mark each lab for upload.
+export async function migrateLegacyLabGrading() {
+  const all = await kvGet(LEGACY_KEY)
+  if (!all) return
+  for (const [labId, sections] of Object.entries(all)) {
+    await kvSet(labKey(labId), { ...sections, ...(await kvGet(labKey(labId))) })
+  }
+  await kvRemove(LEGACY_KEY)
+}
+
 export async function getLabGrading(labId, sectionId) {
-  const all = await readAll()
-  return all?.[labId]?.[sectionId] ?? emptyState()
+  const lab = await readLab(labId)
+  return lab[sectionId] ?? emptyState()
 }
 
 // Autosave the working edits as a draft. Leaves `committed` untouched.
@@ -72,12 +85,11 @@ export async function discardDraft(labId, sectionId) {
 }
 
 export async function clearLabGrading(labId, sectionId) {
-  const all = await readAll()
-  if (!all?.[labId]?.[sectionId]) return
-  const forLab = { ...all[labId] }
-  delete forLab[sectionId]
-  all[labId] = forLab
-  await kvSet(STORAGE_KEY, all)
+  const lab = await readLab(labId)
+  if (!lab[sectionId]) return
+  const rest = { ...lab }
+  delete rest[sectionId]
+  await kvSet(labKey(labId), rest)
 }
 
 export async function hasUnsavedDraft(labId, sectionId) {

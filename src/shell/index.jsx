@@ -8,6 +8,7 @@ import SkipLink from '../components/SkipLink.jsx'
 import { useKeyboardShortcuts } from '../utils/useKeyboardShortcuts.js'
 import ShortcutsPanel from '../components/ShortcutsPanel.jsx'
 import { navigate } from '../utils/nav.js'
+import { SyncIndicator, SyncBanner } from '../components/SyncStatus.jsx'
 
 export default function Home() {
   const [displayMode, setDisplayMode] = useState('tiles')
@@ -42,6 +43,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
           <BrandMark />
           <div className="flex items-center gap-1">
+            <SyncIndicator />
             <button
               onClick={toggleMode}
               className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-hover)] transition-colors duration-75"
@@ -53,6 +55,7 @@ export default function Home() {
             <SettingsButton />
           </div>
         </div>
+        <SyncBanner />
       </div>
 
       {/* Content */}

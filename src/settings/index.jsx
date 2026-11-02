@@ -20,6 +20,7 @@ import { DEFAULT_FLAGS } from '../config/labFlags.js'
 import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../security/pin.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
 import { navigate } from '../utils/nav.js'
+import { SyncSection } from '../components/SyncStatus.jsx'
 
 function AccountSection() {
   const [user, setUser]   = useState(null)
@@ -341,25 +342,44 @@ function SecuritySection() {
 
 function DangerZone() {
   const [confirming, setConfirming] = useState(false)
+  const [eraseCanvasCopy, setEraseCanvasCopy] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
 
   async function handleReset() {
-    await resetExtension()
-    navigate('onboarding', {}, { replace: true, remount: true })
+    setBusy(true)
+    setError(null)
+    try {
+      await resetExtension({ eraseCanvasCopy })
+      navigate('onboarding', {}, { replace: true, remount: true })
+    } catch (err) {
+      // Only the Canvas erase can fail, and it runs first: nothing was wiped.
+      setBusy(false)
+      setError(`Couldn't erase the copy in Canvas: ${err.message}`)
+    }
   }
 
   return (
     <Card className="space-y-3">
       <h2 className="text-base font-semibold text-[var(--color-error)]">Danger Zone</h2>
       <p className="text-sm text-[var(--color-text-muted)]">
-        Resetting clears this tool's PIN, preferences, course setup, and saved grading drafts on this device. Canvas itself is not touched. You'll need to go through setup again.
+        Resetting clears this device: your PIN, activity log, and local copy of everything else. Your preferences, course setup, and grading drafts come back from your Canvas account unless you erase that copy too. Grades in Canvas are never touched.
       </p>
       {!confirming ? (
         <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>Reset Lab Tools</Button>
       ) : (
-        <Callout tone="error" title="This cannot be undone.">
+        <Callout tone="error" title={eraseCanvasCopy ? 'This cannot be undone.' : 'Reset this device?'}>
+          <label className="flex items-start gap-2 mt-2 text-sm text-[var(--color-text-body)]">
+            <input type="checkbox" className="mt-0.5" checked={eraseCanvasCopy} onChange={e => setEraseCanvasCopy(e.target.checked)} />
+            <span>
+              Also erase the synced copy in my Canvas account.
+              <span className="block text-xs text-[var(--color-text-muted)]">Another device that still has its own copy puts it back the next time it opens Lab Tools — reset that device too for a clean start.</span>
+            </span>
+          </label>
+          {error && <p className="text-sm text-[var(--color-error)] mt-2">{error}</p>}
           <div className="flex gap-2 mt-2">
-            <Button variant="danger" size="sm" onClick={handleReset}>Yes, reset everything</Button>
-            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button variant="danger" size="sm" onClick={handleReset} disabled={busy}>{eraseCanvasCopy ? 'Yes, erase everything' : 'Yes, reset this device'}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)} disabled={busy}>Cancel</Button>
           </div>
         </Callout>
       )}
@@ -379,6 +399,7 @@ export default function Settings() {
             <AppearanceSection />
             <CoursesSection />
             <LabFlagsSection />
+            <SyncSection />
             <SecuritySection />
             <DangerZone />
           </div>

@@ -1,6 +1,8 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { getPreferences } from '../storage/preferences.js'
+import { migrateLegacyLabGrading } from '../storage/labGrading.js'
+import { startSync } from '../storage/sync.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
 import '../styles/global.css'
 import { ToastProvider } from '../components/Toast.jsx'
@@ -37,5 +39,24 @@ function Root() {
   )
 }
 
-getPreferences().then(p => { applyPalette(p.palette); applyDarkMode(p.themeMode ?? 'system'); applyTextSize(p.textSize ?? 'medium') })
-createRoot(document.getElementById('root')).render(<Root />)
+// Pull synced data from Canvas before the first render, so pages read this
+// device's copy already merged with edits made elsewhere. If Canvas is slow,
+// startSync gives up waiting after a few seconds and the app renders from
+// local data; anything arriving later shows a refresh prompt.
+async function boot() {
+  const root = createRoot(document.getElementById('root'))
+  root.render(
+    <p className="h-[100dvh] flex items-center justify-center text-sm text-[var(--color-text-muted)] bg-[var(--color-bg-page)]">
+      Syncing with Canvas…
+    </p>,
+  )
+  await migrateLegacyLabGrading()
+  await startSync({ timeoutMs: 5000 })
+  const p = await getPreferences()
+  applyPalette(p.palette)
+  applyDarkMode(p.themeMode ?? 'system')
+  applyTextSize(p.textSize ?? 'medium')
+  root.render(<Root />)
+}
+
+boot()

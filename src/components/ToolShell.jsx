@@ -1,3 +1,5 @@
+import { SyncIndicator, SyncBanner } from './SyncStatus.jsx'
+
 export default function ToolShell({ start, end, children }) {
   // h-[100dvh], not h-screen (100vh): on iPad Safari the browser toolbar makes the
   // visible area shorter than 100vh, so the bottom of the scroll area sat out of
@@ -8,8 +10,9 @@ export default function ToolShell({ start, end, children }) {
       <header className="bg-[var(--color-bg-surface)] border-b border-[var(--color-border)] sticky top-0 z-30">
         <div className="flex items-center justify-between gap-4 h-14 px-4 sm:px-6">
           <div className="flex items-center gap-3 min-w-0">{start}</div>
-          <div className="flex items-center gap-2 shrink-0">{end}</div>
+          <div className="flex items-center gap-2 shrink-0"><SyncIndicator />{end}</div>
         </div>
+        <SyncBanner />
       </header>
       <main id="main-content" className="flex-1 flex flex-col min-h-0">
         {children}

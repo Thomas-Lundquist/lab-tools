@@ -1,4 +1,5 @@
 import { kvGet, kvSet, kvClear } from '../storage/kv.js'
+import { eraseSyncedCopy, afterLocalReset, syncNow } from '../storage/sync.js'
 
 export class PinRequiredError extends Error {}
 
@@ -105,6 +106,12 @@ export async function clearFailedAttempts() {
   await saveSecuritySettings({ failedAttemptCount: 0, lockoutUntil: null, lockoutCount: 0 })
 }
 
-export async function resetExtension() {
+// Wipes this device. Synced data (preferences, course setup, grading) comes
+// back down from Canvas unless `eraseCanvasCopy` deletes it there first — so a
+// forgotten PIN costs the PIN, not the course setup.
+export async function resetExtension({ eraseCanvasCopy = false } = {}) {
+  if (eraseCanvasCopy) await eraseSyncedCopy()
+  else await syncNow().catch(() => {}) // send edits not yet in Canvas before wiping them
   await kvClear()
+  await afterLocalReset({ resync: !eraseCanvasCopy })
 }
