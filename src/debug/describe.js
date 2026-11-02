@@ -1,25 +1,24 @@
 // Turns an intercepted Canvas write into a plain-English line and the
 // coverage categories it exercises. Pure, so it's unit-tested.
 
-// The kinds of write Lab Tools makes, in the order the report's coverage
-// checklist shows them. "Test everything" = every one of these lit up.
+// The kinds of write the app's screens can actually make, in the order the
+// report's coverage checklist shows them, with how to trigger each. "Test
+// everything" = every one of these lit up. Writes the API layer supports but
+// no screen uses (update assignment, assignment-group update/delete, excuse,
+// clearing a score, removing an override — the last two only lived in the
+// unwired AttendancePanel) are left out, and sync is paused in debug mode.
+// describeWrite still labels them if they ever appear. Add a row here when a
+// screen gains a new kind of write.
 export const COVERAGE = [
-  ['assignment-create', 'Create assignment'],
-  ['assignment-update', 'Update assignment'],
-  ['assignment-delete', 'Delete assignment'],
-  ['override-create', 'Create due date / lock'],
-  ['override-update', 'Update due date / lock'],
-  ['override-delete', 'Remove due date / lock'],
-  ['module-item-add', 'Add to module'],
-  ['group-create', 'Create assignment group'],
-  ['group-update', 'Update assignment group'],
-  ['group-delete', 'Delete assignment group'],
-  ['grade-post', 'Post a score'],
-  ['grade-zero', 'Post an absence zero'],
-  ['grade-clear', 'Clear a score'],
-  ['excuse', 'Excuse'],
-  ['comment', 'Post a comment'],
-  ['sync', 'Sync to Canvas account'],
+  ['assignment-create', 'Create assignment', 'Create a pairing or standalone, or push a Unit/Term score whose assignment doesn’t exist yet'],
+  ['override-create', 'Create due date / lock', 'Create a pairing with lab dates, or commit a period with a student marked absent (locks their journal)'],
+  ['override-update', 'Update due date / lock', 'Create a pairing whose journal already has dates for that section'],
+  ['module-item-add', 'Add to module', 'Create a pairing or standalone with a Unit (module) chosen'],
+  ['group-create', 'Create assignment group', 'Enable a course that has no Professionalism assignment group yet'],
+  ['grade-post', 'Post a score', 'Commit a period, or push Unit/Term scores'],
+  ['grade-zero', 'Post an absence zero', 'Commit a period with a student marked absent'],
+  ['comment', 'Post a comment', 'Commit a period with a comment, a library comment, or (if on) flag summaries'],
+  ['assignment-delete', 'Delete assignment', 'Course settings › Clear setup, choosing to delete the pairings'],
 ]
 
 const ID = '(\\d+|debug-\\d+)'

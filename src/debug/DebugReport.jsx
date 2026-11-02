@@ -101,12 +101,15 @@ export default function DebugReport() {
                 Coverage — {COVERAGE.filter(([k]) => done.has(k)).length} of {COVERAGE.length} kinds of write tried
               </h2>
               <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-1">
-                {COVERAGE.map(([key, label]) => (
-                  <li key={key} className="flex items-center gap-2 text-sm">
+                {COVERAGE.map(([key, label, how]) => (
+                  <li key={key} className="flex items-start gap-2 text-sm">
                     {done.has(key)
-                      ? <CheckCircle size={14} className="text-[var(--color-success)]" aria-label="Tried" />
-                      : <Circle size={14} className="text-[var(--color-text-disabled)]" aria-label="Not yet" />}
-                    <span className={done.has(key) ? 'text-[var(--color-text-body)]' : 'text-[var(--color-text-muted)]'}>{label}</span>
+                      ? <CheckCircle size={14} className="text-[var(--color-success)] shrink-0 mt-0.5" aria-label="Tried" />
+                      : <Circle size={14} className="text-[var(--color-text-disabled)] shrink-0 mt-0.5" aria-label="Not yet" />}
+                    <span>
+                      <span className={done.has(key) ? 'text-[var(--color-text-body)]' : 'text-[var(--color-text-muted)]'}>{label}</span>
+                      {!done.has(key) && <span className="block text-xs text-[var(--color-text-muted)]">{how}</span>}
+                    </span>
                   </li>
                 ))}
               </ul>
