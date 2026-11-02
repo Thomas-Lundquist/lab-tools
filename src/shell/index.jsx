@@ -9,6 +9,7 @@ import { useKeyboardShortcuts } from '../utils/useKeyboardShortcuts.js'
 import ShortcutsPanel from '../components/ShortcutsPanel.jsx'
 import { navigate } from '../utils/nav.js'
 import { SyncIndicator, SyncBanner } from '../components/SyncStatus.jsx'
+import { DebugBar } from '../debug/DebugUI.jsx'
 
 export default function Home() {
   const [displayMode, setDisplayMode] = useState('tiles')
@@ -56,6 +57,7 @@ export default function Home() {
           </div>
         </div>
         <SyncBanner />
+        <DebugBar />
       </div>
 
       {/* Content */}

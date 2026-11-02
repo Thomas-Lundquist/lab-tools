@@ -1,4 +1,5 @@
 import { SyncIndicator, SyncBanner } from './SyncStatus.jsx'
+import { DebugBar } from '../debug/DebugUI.jsx'
 
 export default function ToolShell({ start, end, children }) {
   // h-[100dvh], not h-screen (100vh): on iPad Safari the browser toolbar makes the
@@ -13,6 +14,7 @@ export default function ToolShell({ start, end, children }) {
           <div className="flex items-center gap-2 shrink-0"><SyncIndicator />{end}</div>
         </div>
         <SyncBanner />
+        <DebugBar />
       </header>
       <main id="main-content" className="flex-1 flex flex-col min-h-0">
         {children}

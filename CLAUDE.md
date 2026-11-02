@@ -60,7 +60,27 @@ Every Canvas call still goes through `src/api/request.js` (`canvasGet` / `canvas
 
 Each `api/*.js` module maps Canvas's raw snake_case JSON to a camelCase internal shape before returning it (see `assignments.js`'s `mapAssignment` / `buildPayload` pair for the pattern) — components never see raw Canvas JSON.
 
-Errors are typed (`api/errors.js`): `AuthError` (401 — the Canvas session expired; log in and relaunch), `NotFoundError` (404), `RateLimitError` (403, carries backoff ms), `ApiError` (everything else). Callers pattern-match on error type, not HTTP status.
+Errors are typed (`api/errors.js`, built by `errorForResponse`), and callers pattern-match on type, not HTTP status:
+- `AuthError` (401) — the Canvas session expired; log in and relaunch.
+- `NotFoundError` (404).
+- `RateLimitError` (403 whose body says "rate limit"; carries backoff ms).
+- `PermissionError` (any other 403).
+- `NetworkError` (fetch never reached Canvas).
+- `CheckError` (a safety check refused the write).
+- `ApiError` (everything else).
+
+Each error carries a `code` (`LT-401`, `LT-403P`, `LT-403R`, `LT-404`, `LT-409`, `LT-422`, `LT-400`, `LT-5xx`, `LT-NET`, `LT-CHECK`; uncaught app errors log as `LT-APP`). It also carries the `operation` (method + path with ids generalised), Canvas's own `canvasMessage`, and a `nextStep`. `message` is a friendly sentence ending in the code, so existing `toast(\`Could not …: ${err.message}\`)` call sites read well. Pass `{ expectMissing: true }` as a GET's context when a 400/404 just means "not there yet", so it stays out of the diagnostics log.
+
+### Testing aids — debug mode, safety checks, diagnostics (`src/debug/`)
+
+Every Canvas call takes an optional `context` (last argument of `canvasGet/Post/Put/Delete`), which `request.js` hands to two hooks. Hooks are setters, so `request.js` stays free of UI and storage imports:
+- **Write interceptor** (`debugMode.js`). In debug mode, every non-GET is recorded for the report (`DebugReport.jsx`, route `debug`) and answered with a fake reply. Creates get `debug-N` ids so multi-step flows continue, and a GET of a `debug-N` id is answered locally. Real reads still hit Canvas. Debug mode is memory-only (off on relaunch). It switches `kv.js` to a sandbox prefix (`labtools-debug:`, a copy of the real keys) and pauses sync. Exit throws the sandbox away. Code that touches `localStorage` directly must use `keyPrefix()`, not `KEY_PREFIX`, to follow the switch.
+- **Failure listener** (`diagnostics.js`). Every failure is logged locally, last 50, deduped. That includes failures a caller swallows, like one student in a commit loop. Shown on Settings › Testing.
+- **Safety checks** (`checks.js`, pure). `updateSubmissionGrade` runs `checkGradeWrite` on every grade/comment write, live or debug. A `block` result makes `request.js` throw `CheckError` before anything is sent: a non-numeric or negative score, a blank comment, `undefined`/`null`/`NaN`/`[object Object]` in a comment, or a non-Canvas id. Any live write whose path holds a `debug-N` id is also refused. `warn` results only show in the report.
+
+Grade call sites pass `{ studentName, assignmentLabel, kind, absent, existingComments }` as context for the checks and the report. Do the same for new grade paths.
+
+**Copy for Claude** (`scrub.js`) strips student names, ids, well-formed scores, and comment text before anything is copied. Keep it that way — pasting into a chat sends the text to Anthropic.
 
 ### PIN gate / write protection — unchanged
 

@@ -182,8 +182,10 @@ export function ToastProvider({ children }) {
           return (
             <div
               key={t.id}
-              onMouseEnter={() => handleMouseEnter(t.id)}
-              onMouseLeave={() => handleMouseLeave(t.id)}
+              // Pointer events, mouse only: on iPad a tap fires a hover that never
+              // ends, which would leave the toast paused on screen indefinitely.
+              onPointerEnter={e => { if (e.pointerType === 'mouse') handleMouseEnter(t.id) }}
+              onPointerLeave={e => { if (e.pointerType === 'mouse') handleMouseLeave(t.id) }}
               style={s.container}
               className={`flex flex-col px-4 py-3 rounded-xl border shadow-lg text-sm pointer-events-auto max-w-sm ${t.exiting ? 'toast-exit' : 'toast-enter'}`}
             >

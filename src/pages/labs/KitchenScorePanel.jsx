@@ -174,7 +174,9 @@ export default function KitchenScorePanel({
           // deduped like the present path. Absent students carry no flag summary.
           const note = buildComment(section, s.userId, 0, commentsOn, byId)
           if (note && !(profComments[s.userId] ?? []).includes(note)) {
-            await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, { text_comment: note })
+            await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, { text_comment: note }, {
+              studentName: s.userName, assignmentLabel: entry.name, kind: 'professionalism', existingComments: profComments[s.userId],
+            })
           }
         } else {
           const value = deriveStudentScore(section, s.userId, maxScore, byId)
@@ -184,7 +186,11 @@ export default function KitchenScorePanel({
           // submission, so re-committing unchanged work does not duplicate it.
           const comment = buildComment(section, s.userId, value, commentsOn, byId)
           if (comment && !(profComments[s.userId] ?? []).includes(comment)) fields.text_comment = comment
-          await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, fields)
+          // A student with no derivable score posts "null" here, which the
+          // safety checks in updateSubmissionGrade block (LT-CHECK) rather than send.
+          await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, s.userId, fields, {
+            studentName: s.userName, assignmentLabel: entry.name, kind: 'professionalism', existingComments: profComments[s.userId],
+          })
         }
       } catch { failed++ }
       done++
@@ -193,7 +199,7 @@ export default function KitchenScorePanel({
     await commitLabGrading(labId, sectionId, section)
     await refreshScores()
     setSaving(false); setConfirming(false); setProgress('')
-    if (failed) toast(`Committed ${roster.length - failed} of ${roster.length} — ${failed} failed`, 'warning')
+    if (failed) toast(`Committed ${roster.length - failed} of ${roster.length} — ${failed} failed. Details: Settings › Testing › Diagnostics`, 'warning')
     else toast(`Committed ${roster.length} student${roster.length === 1 ? '' : 's'} for ${entry.name}`, 'success')
     onChanged?.()
   }

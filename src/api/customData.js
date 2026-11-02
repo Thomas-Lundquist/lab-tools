@@ -28,7 +28,7 @@ export const isMissing = err =>
 // Every document in the namespace, as { docPath: jsonString }.
 export async function getAllDocs() {
   try {
-    const res = await canvasGet(ROOT, { ns: NAMESPACE })
+    const res = await canvasGet(ROOT, { ns: NAMESPACE }, { expectMissing: true })
     return flattenDocs(res?.data)
   } catch (err) {
     if (isMissing(err)) return {}
@@ -39,7 +39,7 @@ export async function getAllDocs() {
 // One document's JSON string, or undefined if it isn't there.
 export async function getDoc(docPath) {
   try {
-    const res = await canvasGet(docUrl(docPath), { ns: NAMESPACE })
+    const res = await canvasGet(docUrl(docPath), { ns: NAMESPACE }, { expectMissing: true })
     return typeof res?.data === 'string' ? res.data : undefined
   } catch (err) {
     if (isMissing(err)) return undefined

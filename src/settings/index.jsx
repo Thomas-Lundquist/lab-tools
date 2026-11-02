@@ -21,6 +21,7 @@ import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../secu
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
 import { navigate } from '../utils/nav.js'
 import { SyncSection } from '../components/SyncStatus.jsx'
+import { TestingSection } from '../debug/DebugUI.jsx'
 
 function AccountSection() {
   const [user, setUser]   = useState(null)
@@ -401,6 +402,7 @@ export default function Settings() {
             <LabFlagsSection />
             <SyncSection />
             <SecuritySection />
+            <TestingSection />
             <DangerZone />
           </div>
         </div>

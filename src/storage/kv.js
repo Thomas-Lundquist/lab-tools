@@ -17,6 +17,34 @@
 
 export const KEY_PREFIX = 'labtools:'
 
+// Debug mode (src/debug/debugMode.js) points every store at a throwaway copy
+// under SANDBOX_PREFIX, so a test session never touches the real data. Code
+// that touches localStorage directly uses keyPrefix(), not KEY_PREFIX, so it
+// follows the switch. ('labtools-debug:' doesn't start with 'labtools:', so
+// the two never overlap.)
+export const SANDBOX_PREFIX = 'labtools-debug:'
+let prefix = KEY_PREFIX
+export const keyPrefix = () => prefix
+export function setKeyPrefix(p) { prefix = p }
+
+// Raw helpers for the sandbox: copy or drop every key under a prefix.
+export function rawKeysWithPrefix(p) {
+  const keys = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k?.startsWith(p)) keys.push(k.slice(p.length))
+  }
+  return keys
+}
+export function removeKeysWithPrefix(p) {
+  rawKeysWithPrefix(p).forEach(k => localStorage.removeItem(p + k))
+}
+export function copyKeys(fromPrefix, toPrefix, keep = () => true) {
+  for (const k of rawKeysWithPrefix(fromPrefix)) {
+    if (keep(k)) localStorage.setItem(toPrefix + k, localStorage.getItem(fromPrefix + k))
+  }
+}
+
 const writeListeners = new Set()
 
 export function onKvWrite(listener) {
@@ -26,7 +54,7 @@ export function onKvWrite(listener) {
 
 export function localGet(key) {
   try {
-    const raw = localStorage.getItem(KEY_PREFIX + key)
+    const raw = localStorage.getItem(prefix + key)
     return raw == null ? undefined : JSON.parse(raw)
   } catch {
     return undefined
@@ -34,18 +62,13 @@ export function localGet(key) {
 }
 
 export function localSet(key, value) {
-  if (value === undefined) localStorage.removeItem(KEY_PREFIX + key)
-  else localStorage.setItem(KEY_PREFIX + key, JSON.stringify(value))
+  if (value === undefined) localStorage.removeItem(prefix + key)
+  else localStorage.setItem(prefix + key, JSON.stringify(value))
 }
 
 // Every key this app has stored, without the prefix.
 export function localKeys() {
-  const keys = []
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)
-    if (k?.startsWith(KEY_PREFIX)) keys.push(k.slice(KEY_PREFIX.length))
-  }
-  return keys
+  return rawKeysWithPrefix(prefix)
 }
 
 export async function kvGet(key) {
@@ -64,5 +87,5 @@ export async function kvRemove(key) {
 }
 
 export async function kvClear() {
-  localKeys().forEach(k => localStorage.removeItem(KEY_PREFIX + k))
+  removeKeysWithPrefix(prefix)
 }

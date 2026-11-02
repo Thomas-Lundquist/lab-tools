@@ -10,7 +10,7 @@ import ShortcutsPanel from '../../components/ShortcutsPanel.jsx'
 import { getCourses } from '../../api/courses.js'
 import { getPreferences, setLastUsedCourse, resolveInitialCourseId, visibleCourses } from '../../storage/preferences.js'
 import { getCourseSetup } from '../../storage/setup.js'
-import { KEY_PREFIX } from '../../storage/kv.js'
+import { keyPrefix } from '../../storage/kv.js'
 import SetupBootstrapModal from './SetupBootstrapModal.jsx'
 import CourseSettingsModal from './CourseSettingsModal.jsx'
 import ProfessionalismPanel from './ProfessionalismPanel.jsx'
@@ -37,14 +37,14 @@ const TABS = [
 // the teacher in place. Selection is sticky; grading drafts live in labGrading.
 const CTX_KEY = 'labWorkingContext'
 function loadCtx(courseId) {
-  try { return (JSON.parse(localStorage.getItem(KEY_PREFIX + CTX_KEY) || '{}')[courseId]) ?? {} }
+  try { return (JSON.parse(localStorage.getItem(keyPrefix() + CTX_KEY) || '{}')[courseId]) ?? {} }
   catch { return {} }
 }
 function saveCtx(courseId, ctx) {
   try {
-    const all = JSON.parse(localStorage.getItem(KEY_PREFIX + CTX_KEY) || '{}')
+    const all = JSON.parse(localStorage.getItem(keyPrefix() + CTX_KEY) || '{}')
     all[courseId] = ctx
-    localStorage.setItem(KEY_PREFIX + CTX_KEY, JSON.stringify(all))
+    localStorage.setItem(keyPrefix() + CTX_KEY, JSON.stringify(all))
   } catch { /* localStorage unavailable — selection just won't persist */ }
 }
 

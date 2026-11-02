@@ -133,7 +133,9 @@ function RollupSection({
     let done = 0, failed = 0
     for (const { student, r } of toPush) {
       try {
-        await updateSubmissionGrade(courseId, target.id, student.userId, { posted_grade: String(r.value) })
+        await updateSubmissionGrade(courseId, target.id, student.userId, { posted_grade: String(r.value) }, {
+          studentName: student.userName, assignmentLabel: target.name ?? title, kind: 'unit',
+        })
       } catch {
         failed++
       }
@@ -144,7 +146,7 @@ function RollupSection({
     setPushing(false)
     setConfirm(null)
     setProgress('')
-    if (failed) toast(`Pushed ${toPush.length - failed} of ${toPush.length} grades to "${title}" — ${failed} failed`, 'warning')
+    if (failed) toast(`Pushed ${toPush.length - failed} of ${toPush.length} grades to "${title}" — ${failed} failed. Details: Settings › Testing › Diagnostics`, 'warning')
     else toast(`Pushed ${toPush.length} grade${toPush.length === 1 ? '' : 's'} to "${title}"`, 'success')
   }
 

@@ -1,4 +1,5 @@
 import { canvasGetAll, canvasPut } from './request.js'
+import { checkGradeWrite } from '../debug/checks.js'
 
 // Returns all assignments for a course enriched with submission_summary counts.
 // Used by Grading Dashboard. Future: At-Risk Dashboard, Grade Trend features.
@@ -37,13 +38,22 @@ export async function getCourseSubmissions(courseId, assignmentIds) {
 // fields: { posted_grade: '85' } to set a score, '' to clear it, or { excuse: true }
 // to excuse. A `text_comment` field is lifted into Canvas's separate top-level
 // `comment` param — Canvas doesn't accept comments nested under `submission`.
-export async function updateSubmissionGrade(courseId, assignmentId, userId, fields) {
+//
+// Every grade write passes the safety checks in debug/checks.js first; a
+// blocking result means nothing is sent (CheckError, LT-CHECK). `context` is
+// optional and only improves the checks and the debug report:
+//   { studentName, assignmentLabel, kind: 'professionalism'|'journal'|'unit', pointsPossible, existingComments }
+export async function updateSubmissionGrade(courseId, assignmentId, userId, fields, context = {}) {
+  const checks = checkGradeWrite({ courseId, assignmentId, userId, fields, context })
   const { text_comment, ...submissionFields } = fields
   const body = { submission: submissionFields }
   if (text_comment) body.comment = { text_comment }
+  // A blank comment still has to reach the check (and be blocked), not vanish.
+  else if (Object.hasOwn(fields, 'text_comment')) body.comment = { text_comment }
   return canvasPut(
     `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`,
     body,
+    { ...context, checks },
   )
 }
 

@@ -134,7 +134,10 @@ export function createSyncEngine({ store, remote }) {
     return serial(() => remote.deleteAllDocs())
   }
 
-  return { noteWrite, hasPending, pull, push, eraseRemote }
+  // Resolves once any pull/push already queued has finished.
+  const idle = () => chain
+
+  return { noteWrite, hasPending, pull, push, eraseRemote, idle }
 }
 
 // ---- the app's instance: scheduling and status ----
@@ -204,8 +207,26 @@ async function run(task) {
   }
 }
 
+// Debug mode works on a sandbox copy of local data (storage/kv.js) and must
+// not sync it anywhere. pauseSync waits for any sync already running to finish
+// first, so nothing is half-written when the storage prefix switches.
+let paused = false
+
+export async function pauseSync() {
+  paused = true
+  clearTimeout(pushTimer)
+  pushTimer = null
+  await engine.idle()
+}
+
+export function resumeSync() {
+  paused = false
+  syncNow().catch(() => {})
+}
+
 // Pull, then push anything waiting. Resolves to the keys changed locally.
 export function syncNow() {
+  if (paused) return Promise.resolve([])
   clearTimeout(pushTimer)
   lastPullAt = Date.now()
   return run(async () => {
@@ -218,10 +239,12 @@ export function syncNow() {
 function pushNow() {
   clearTimeout(pushTimer)
   pushTimer = null
+  if (paused) return
   run(() => engine.push()).catch(() => {})
 }
 
 function schedulePush() {
+  if (paused) return
   clearTimeout(pushTimer)
   pushTimer = setTimeout(pushNow, PUSH_DELAY_MS)
   if (status.phase !== 'syncing' && status.phase !== 'error') setStatus({ phase: 'pending' })
@@ -234,7 +257,7 @@ export async function startSync({ timeoutMs = 5000 } = {}) {
   if (!started) {
     started = true
     onKvWrite(key => {
-      if (!isSyncedKey(key)) return
+      if (paused || !isSyncedKey(key)) return
       engine.noteWrite(key)
       schedulePush()
     })

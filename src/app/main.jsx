@@ -13,13 +13,17 @@ import Home from '../shell/index.jsx'
 import LabsPage from '../pages/labs/index.jsx'
 import Settings from '../settings/index.jsx'
 import Onboarding from '../pages/onboarding/App.jsx'
+import DebugReport from '../debug/DebugReport.jsx'
+// Installs the debug-mode write interceptor before any request can run.
+import { clearLeftoverSandbox } from '../debug/debugMode.js'
+import { installDiagnostics } from '../debug/diagnostics.js'
 
 // The whole app's single entry. In production launch.js loads this module into
 // a document on the Canvas origin; in dev, app.html loads it on localhost.
 // Each tool used to be its own HTML page — see utils/nav.js for why it's one
 // page with in-app routes now.
 
-const PAGES = { home: Home, labs: LabsPage, settings: Settings }
+const PAGES = { home: Home, labs: LabsPage, settings: Settings, debug: DebugReport }
 
 function Routes() {
   const { route } = useRoute()
@@ -44,6 +48,8 @@ function Root() {
 // startSync gives up waiting after a few seconds and the app renders from
 // local data; anything arriving later shows a refresh prompt.
 async function boot() {
+  installDiagnostics()
+  clearLeftoverSandbox() // debug mode never survives a relaunch
   const root = createRoot(document.getElementById('root'))
   root.render(
     <p className="h-[100dvh] flex items-center justify-center text-sm text-[var(--color-text-muted)] bg-[var(--color-bg-page)]">

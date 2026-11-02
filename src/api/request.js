@@ -1,4 +1,4 @@
-import { AuthError, RateLimitError, NotFoundError, ApiError } from './errors.js'
+import { NotFoundError, CheckError, errorForResponse, networkError } from './errors.js'
 import { canvasOrigin, csrfToken } from './canvasContext.js'
 
 // The app runs inside the Canvas origin (launched by launch.js — see
@@ -32,37 +32,89 @@ function buildHeaders(method) {
   return headers
 }
 
-async function executeRequest({ url, method, body }) {
+// ---- hooks: debug mode and diagnostics plug in here (src/debug/) ----
+// Kept as setters rather than imports so this module stays free of UI and
+// storage dependencies.
+//
+// writeInterceptor({ method, url, body, context, operation }) is called for
+// every non-GET before it is sent, and for a GET of a fake `debug-N` id.
+// Returning { value } means "handled — don't send; reply with this JSON"
+// (debug mode). Returning nothing sends it live.
+// failureListener(err, { method, url, context, operation }) sees every failure.
+let writeInterceptor = null
+let failureListener = null
+export function setWriteInterceptor(fn) { writeInterceptor = fn }
+export function setFailureListener(fn) { failureListener = fn }
+
+// Method + path with ids generalised — safe to show and to copy into a report.
+export function describeOperation(method, url) {
+  let path
+  try { path = new URL(url, 'x:/').pathname } catch { path = String(url).split('?')[0] }
+  return `${method} ${path.replace(/^\/api\/v1/, '').replace(/\/(\d+|debug-\d+|self)(?=\/|$)/g, '/:id')}`
+}
+
+const FAKE_ID_IN_PATH = /\/debug-\d+(?=\/|$)/
+
+async function executeRequest({ url, method, body, json, context }) {
+  context = context ?? {}
+  const operation = describeOperation(method, url)
+  try {
+    // In debug mode, a read of something only created this session (a fake
+    // `debug-N` id) is answered locally instead of 404ing against Canvas.
+    if (method === 'GET' && FAKE_ID_IN_PATH.test(new URL(url).pathname)) {
+      const handled = writeInterceptor?.({ method, url, context, operation })
+      if (handled) return fakeResponse(handled.value)
+    }
+    if (method !== 'GET') {
+      const blocked = (context.checks ?? []).filter(c => c.level === 'block')
+      const handled = writeInterceptor?.({ method, url, body: json, context, operation })
+      if (blocked.length) throw new CheckError(blocked, { operation })
+      if (handled) return fakeResponse(handled.value)
+      // A fake id from a debug-mode session must never reach live Canvas.
+      if (FAKE_ID_IN_PATH.test(new URL(url).pathname)) {
+        throw new CheckError([{ level: 'block', rule: 'debug-id', message: 'a test id from debug mode was about to be sent to Canvas' }], { operation })
+      }
+    }
+    return await send({ url, method, body, operation })
+  } catch (err) {
+    const expectedMissing = context.expectMissing && (err instanceof NotFoundError || err?.statusCode === 400)
+    if (!expectedMissing) failureListener?.(err, { method, url, context, operation })
+    throw err
+  }
+}
+
+async function send({ url, method, body, operation }) {
   if (rateLimitBackoffUntil && Date.now() < rateLimitBackoffUntil) {
     await sleep(rateLimitBackoffUntil - Date.now())
   }
 
-  const response = await fetch(url, { method, headers: buildHeaders(method), body, credentials: 'same-origin' })
-
-  if (response.status === 401) throw new AuthError('Your Canvas session has expired. Log in to Canvas again, then relaunch Lab Tools.')
-  if (response.status === 404) throw new NotFoundError(`Resource not found: ${url}`)
-
-  if (response.status === 403) {
-    const remaining = response.headers.get('X-Rate-Limit-Remaining')
-    const backoffMs = remaining ? parseInt(remaining) * 1000 : 10000
-    rateLimitBackoffUntil = Date.now() + backoffMs
-    throw new RateLimitError(`Rate limited. Retrying in ${backoffMs}ms.`, backoffMs)
+  let response
+  try {
+    response = await fetch(url, { method, headers: buildHeaders(method), body, credentials: 'same-origin' })
+  } catch (cause) {
+    throw networkError(cause, operation)
   }
+  if (response.ok) return response
 
-  if (!response.ok) {
-    const detail = await canvasErrorMessage(response)
-    const err = new ApiError(`Request failed: ${response.status} ${response.statusText}${detail ? ` (${detail})` : ''}`, response.status)
-    err.canvasMessage = detail
-    throw err
-  }
+  const text = await response.text().catch(() => '')
+  const canvasMessage = canvasErrorMessage(text)
+  // Canvas throttling is a 403 whose body says so; any other 403 is a permission problem.
+  const rateLimited = response.status === 403 && /rate limit/i.test(text)
+  const backoffMs = 10000
+  if (rateLimited) rateLimitBackoffUntil = Date.now() + backoffMs
+  throw errorForResponse(response.status, response.statusText, { canvasMessage, operation, rateLimited, backoffMs })
+}
 
-  return response
+function fakeResponse(value) {
+  return value == null
+    ? new Response(null, { status: 204 })
+    : new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
 // Canvas explains most failures in the body: { message } or { errors: [{ message }] }.
-export async function canvasErrorMessage(response) {
+export function canvasErrorMessage(text) {
   try {
-    const body = JSON.parse((await response.text()).replace(/^while\(1\);/, ''))
+    const body = JSON.parse(String(text).replace(/^while\(1\);/, ''))
     return body?.message ?? body?.errors?.[0]?.message ?? (typeof body?.errors === 'string' ? body.errors : null)
   } catch {
     return null
@@ -107,8 +159,12 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-export async function canvasGet(path, params = {}) {
-  const response = await executeRequest({ url: buildUrl(path, params), method: 'GET' })
+// `context` (optional, every verb) travels with the request to the hooks:
+//   checks         — safety-check results; any 'block' stops the write (CheckError)
+//   expectMissing  — a 400/404 here means "not there yet", so don't log it
+//   studentName, assignmentLabel, kind — labels for the debug report
+export async function canvasGet(path, params = {}, context) {
+  const response = await executeRequest({ url: buildUrl(path, params), method: 'GET', context })
   return readJson(response)
 }
 
@@ -130,16 +186,16 @@ export async function canvasGetAll(path, params = {}, onProgress) {
   return allResults
 }
 
-export async function canvasPut(path, body = {}) {
-  const response = await executeRequest({ url: buildUrl(path), method: 'PUT', body: JSON.stringify(body) })
+export async function canvasPut(path, body = {}, context) {
+  const response = await executeRequest({ url: buildUrl(path), method: 'PUT', body: JSON.stringify(body), json: body, context })
   return readJson(response)
 }
 
-export async function canvasPost(path, body = {}) {
-  const response = await executeRequest({ url: buildUrl(path), method: 'POST', body: JSON.stringify(body) })
+export async function canvasPost(path, body = {}, context) {
+  const response = await executeRequest({ url: buildUrl(path), method: 'POST', body: JSON.stringify(body), json: body, context })
   return readJson(response)
 }
 
-export async function canvasDelete(path) {
-  await executeRequest({ url: buildUrl(path), method: 'DELETE' })
+export async function canvasDelete(path, context) {
+  await executeRequest({ url: buildUrl(path), method: 'DELETE', context })
 }

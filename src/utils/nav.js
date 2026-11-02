@@ -2,7 +2,8 @@ import { useSyncExternalStore } from 'react'
 
 // In-app routing. The app is one page because it runs in a document on the
 // Canvas origin (see launch.js) and can't navigate to other pages without
-// leaving that origin. Routes: 'home', 'labs', 'settings', 'onboarding'.
+// leaving that origin. Routes: 'home', 'labs', 'settings', 'onboarding', and
+// 'debug' (the dry-run report, src/debug/DebugReport.jsx).
 //
 // The route is mirrored to location.hash when the document has a real URL
 // (local dev, a userscript-launched Canvas URL), so reload and back/forward
@@ -13,7 +14,7 @@ import { useSyncExternalStore } from 'react'
 // tree on it, standing in for the full page load the multi-page app used to
 // do after a reset, so no provider or overlay state survives one.
 
-const ROUTES = ['home', 'labs', 'settings', 'onboarding']
+const ROUTES = ['home', 'labs', 'settings', 'onboarding', 'debug']
 const hasRealUrl = () => /^https?:$/.test(window.location.protocol)
 
 function parseHash() {
@@ -50,6 +51,8 @@ export function navigate(route, params = {}, { replace = false, remount = false 
   setCurrent({ route, params, epoch: current.epoch + (remount ? 1 : 0) })
   window.scrollTo(0, 0)
 }
+
+export const currentRoute = () => current.route
 
 export function useRoute() {
   return useSyncExternalStore(

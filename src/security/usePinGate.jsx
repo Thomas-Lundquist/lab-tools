@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState } from 'react'
 import PinPrompt from '../components/PinPrompt.jsx'
 import { isSessionLocked, refreshActivity, getSecuritySettings, PinRequiredError } from './pin.js'
 import { logAuditEntry } from './audit-log.js'
+import { withAction } from '../debug/debugMode.js'
 
 const PinGateContext = createContext(null)
 
@@ -20,14 +21,14 @@ export function PinGateProvider({ children }) {
       if (forcePrompt) {
         throw new PinRequiredError('Set up a PIN in Settings to use this feature.')
       }
-      await action()
+      await withAction(auditMeta.summary, action)
       await logAuditEntry({ ...auditMeta, pinVerified: 'disabled' })
       await refreshActivity()
       return
     }
 
     if (!forcePrompt && !(await isSessionLocked())) {
-      await action()
+      await withAction(auditMeta.summary, action)
       await logAuditEntry({ ...auditMeta, pinVerified: true })
       await refreshActivity()
       return
@@ -40,7 +41,7 @@ export function PinGateProvider({ children }) {
   async function handleVerified() {
     setVisible(false)
     if (pending) {
-      await pending.action()
+      await withAction(pending.auditMeta.summary, pending.action)
       await logAuditEntry({ ...pending.auditMeta, pinVerified: true })
       await refreshActivity()
       setPending(null)

@@ -11,10 +11,12 @@ export async function commitAbsent(courseId, entry, userId, { excused, zeroJourn
   await updateSubmissionGrade(courseId, entry.professionalismAssignmentId, userId, {
     posted_grade: '0',
     ...(excused ? { text_comment: 'Excused absence — zero until the lab makeup is graded.' } : {}),
-  })
+  }, { studentName: userName, assignmentLabel: entry.name, kind: 'professionalism', absent: true })
 
   if (entry.journalAssignmentId && zeroJournalWhenAbsent) {
-    await updateSubmissionGrade(courseId, entry.journalAssignmentId, userId, { posted_grade: '0' })
+    await updateSubmissionGrade(courseId, entry.journalAssignmentId, userId, { posted_grade: '0' }, {
+      studentName: userName, assignmentLabel: `${entry.name} — Journal`, kind: 'journal', absent: true,
+    })
   }
 
   if (entry.journalAssignmentId) {

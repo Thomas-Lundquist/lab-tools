@@ -33,7 +33,7 @@ test('a namespace that was never written (404) reads as empty', async () => {
 
 test('other failures still throw, carrying Canvas\'s own message', async () => {
   stubFetch(() => respond(500, { errors: [{ message: 'boom' }] }))
-  await assert.rejects(getDoc('setup'), /500.*boom/)
+  await assert.rejects(getDoc('setup'), /boom.*LT-5xx/)
 })
 
 test('a write sends ns in the query and body, the document as a string, and the CSRF token', async () => {
