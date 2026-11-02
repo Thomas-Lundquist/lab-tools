@@ -23,7 +23,7 @@
 //                     students: { [studentId]: { kitchen, flagIds, present } } }
 
 import { kvGet, kvSet, kvRemove } from './kv.js'
-import { countKitchenSeverities, FLAG_BY_ID } from '../config/labFlags.js'
+import { countKitchenSeverities, individualPenalty, FLAG_BY_ID } from '../config/labFlags.js'
 import { kitchenScore, studentScore, ABSENT_SCORE } from '../pages/labs/kitchenScoring.js'
 
 const LEGACY_KEY = 'labGrading'
@@ -122,7 +122,7 @@ export function deriveStudentScore(section, studentId, maxScore = 4, flagsById =
   if (student.exceeded && indivCount === 0) return 4
   const kitchen = student.kitchen != null ? section?.kitchens?.[student.kitchen] : null
   const { minor, critical } = countKitchenSeverities(kitchen?.flagIds ?? [], flagsById)
-  const tier = studentScore(kitchenScore(minor, critical), indivCount)
+  const tier = studentScore(kitchenScore(minor, critical), individualPenalty(student.flagIds ?? [], flagsById))
   // A clean result (tier 4) posts the top: the kitchen's "Exceeded" toggle upgrades
   // it to a true 4 (100%), otherwise it posts the configured max (default 4, e.g.
   // 3.6 for a softer A). Any flag that pulls the tier below 4 overrides the toggle

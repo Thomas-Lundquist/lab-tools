@@ -5,8 +5,11 @@
 //   - Kitchen flags apply to every student in that kitchen. Each is 'minor' or
 //     'critical'; kitchenScoring.js turns the per-kitchen minor/critical counts
 //     into a kitchen score (see that file for the thresholds).
-//   - Individual flags apply to one student and each drops their score one tier
-//     (studentScore = max(1, kitchenScore - individualFlagCount)).
+//   - Individual flags apply to one student. Each is also 'minor' or 'critical'
+//     (shown as Major), weighted like kitchen flags — a Major counts as two
+//     Minors: a Minor drops the student one tier, a Major two
+//     (studentScore = max(1, kitchenScore - individualPenalty)). A flag saved
+//     before individual severities existed has none and counts as Minor.
 //
 // `id` is a STABLE slug and is what a stored lab records — never the label or an
 // array index. That way the teacher can reword a label here, or reorder the
@@ -28,13 +31,13 @@ export const KITCHEN_FLAGS = [
 ]
 
 export const INDIVIDUAL_FLAGS = [
-  { id: 'left-share-to-group',      label: 'Left their share to the group',               scope: 'individual' },
-  { id: 'unsafe-horseplay',         label: 'Unsafe behavior / horseplay / throwing',      scope: 'individual' },
-  { id: 'left-kitchen-repeatedly',  label: 'Left kitchen repeatedly or for extended time', scope: 'individual' },
-  { id: 'ignored-correction',       label: 'Ignored correction',                          scope: 'individual' },
-  { id: 'phone-out',                label: 'Phone out during lab',                        scope: 'individual' },
-  { id: 'no-apron-or-hair',         label: 'No apron / hair not tied back',               scope: 'individual' },
-  { id: 'eating-or-drinking',       label: 'Eating or drinking outside of tasting',       scope: 'individual' },
+  { id: 'left-share-to-group',      label: 'Left their share to the group',               scope: 'individual', severity: 'minor' },
+  { id: 'unsafe-horseplay',         label: 'Unsafe behavior / horseplay / throwing',      scope: 'individual', severity: 'minor' },
+  { id: 'left-kitchen-repeatedly',  label: 'Left kitchen repeatedly or for extended time', scope: 'individual', severity: 'minor' },
+  { id: 'ignored-correction',       label: 'Ignored correction',                          scope: 'individual', severity: 'minor' },
+  { id: 'phone-out',                label: 'Phone out during lab',                        scope: 'individual', severity: 'minor' },
+  { id: 'no-apron-or-hair',         label: 'No apron / hair not tied back',               scope: 'individual', severity: 'minor' },
+  { id: 'eating-or-drinking',       label: 'Eating or drinking outside of tasting',       scope: 'individual', severity: 'minor' },
 ]
 
 // The built-in defaults as one flat list. Seeds the teacher-editable store
@@ -66,6 +69,14 @@ export function flagIndex(flags = DEFAULT_FLAGS) {
 // the given id->flag index (defaults to the built-in one). Unknown ids (a flag
 // removed after a lab was saved) are ignored rather than throwing, so old labs
 // still score.
+// Tiers a student's own flags take off their kitchen's score: 1 per Minor,
+// 2 per Major (critical). Unknown ids (a flag removed after the lab was saved)
+// and flags with no severity count as Minor, which is what every individual
+// flag was before severities existed — so older labs keep their scores.
+export function individualPenalty(flagIds = [], byId = FLAG_BY_ID) {
+  return flagIds.reduce((sum, id) => sum + (byId[id]?.severity === 'critical' ? 2 : 1), 0)
+}
+
 export function countKitchenSeverities(flagIds = [], byId = FLAG_BY_ID) {
   let minor = 0
   let critical = 0

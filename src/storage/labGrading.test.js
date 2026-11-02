@@ -161,3 +161,26 @@ test('marking present/absent flips the score to and from zero', () => {
   section = setPresent(section, 's3', true)
   assert.equal(deriveStudentScore(section, 's3'), 4)
 })
+
+// --- individual Minor/Major (2026-11-02): weighted like kitchen flags ---
+
+test('an individual Major drops two tiers, a Minor one; never below 1', () => {
+  const byId = {
+    k1: { id: 'k1', scope: 'kitchen', severity: 'minor' },
+    im: { id: 'im', scope: 'individual', severity: 'minor' },
+    iM: { id: 'iM', scope: 'individual', severity: 'critical' },
+    old: { id: 'old', scope: 'individual' }, // saved before severities existed
+  }
+  const sec = flags => ({ kitchens: { 1: { flagIds: [] }, 2: { flagIds: ['k1'] } }, students: { s: { kitchen: 1, present: true, flagIds: flags } } })
+  assert.equal(deriveStudentScore(sec(['im']), 's', 4, byId), 3)
+  assert.equal(deriveStudentScore(sec(['iM']), 's', 4, byId), 2)
+  assert.equal(deriveStudentScore(sec(['im', 'iM']), 's', 4, byId), 1)
+  assert.equal(deriveStudentScore(sec(['iM', 'iM']), 's', 4, byId), 1, 'floor at 1')
+  assert.equal(deriveStudentScore(sec(['old']), 's', 4, byId), 3, 'no severity counts as Minor')
+  assert.equal(deriveStudentScore(sec(['gone']), 's', 4, byId), 3, 'a removed flag still counts as Minor, as before')
+})
+
+test('built-in individual flags are all Minor, so existing labs keep their scores', async () => {
+  const { INDIVIDUAL_FLAGS } = await import('../config/labFlags.js')
+  assert.ok(INDIVIDUAL_FLAGS.every(f => f.severity === 'minor'))
+})

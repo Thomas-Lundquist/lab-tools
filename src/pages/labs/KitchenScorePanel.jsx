@@ -569,7 +569,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         <div className={`${open ? 'flex' : 'hidden'} md:flex flex-wrap gap-1 md:pl-36`}>
           {st.flagIds.map(id => (
             <Chip key={id} tone="individual" active onClick={() => onApply(s => toggleStudentFlag(s, student.userId, id))} title="Remove">
-              {flagsById[id]?.label ?? id} ✕
+              {flagsById[id]?.label ?? id}{flagsById[id]?.severity === 'critical' ? ' · Major' : ''} ✕
             </Chip>
           ))}
         </div>
@@ -649,7 +649,7 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
               return (
                 <Chip key={o.id} tone={toneFor ? toneFor(o.id) : 'individual'} active={on}
                   onClick={() => onToggle(o.id)} title={on ? 'Remove' : 'Add'}>
-                  {o.label}
+                  {o.label}{o.scope === 'individual' && o.severity === 'critical' ? ' · Major' : ''}
                 </Chip>
               )
             })}

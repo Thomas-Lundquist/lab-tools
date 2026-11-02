@@ -31,8 +31,10 @@ export function kitchenScore(minorCount, criticalCount) {
   return 4
 }
 
-// A student's score is their kitchen's score minus one tier per individual flag,
-// never below 1. (Absent is handled separately — see ABSENT_SCORE.)
-export function studentScore(kitchenScoreValue, individualFlagCount) {
-  return Math.max(1, kitchenScoreValue - individualFlagCount)
+// A student's score is their kitchen's score minus their individual penalty in
+// tiers — 1 per Minor individual flag, 2 per Major, the kitchen's own "a Major is
+// about two Minors" weighting (labFlags.js individualPenalty) — never below 1.
+// (Absent is handled separately — see ABSENT_SCORE.)
+export function studentScore(kitchenScoreValue, individualPenaltyTiers) {
+  return Math.max(1, kitchenScoreValue - individualPenaltyTiers)
 }

@@ -259,7 +259,7 @@ function GradingSection() {
   function addFlag(scope) {
     const flag = scope === 'kitchen'
       ? { id: `flag_${Date.now()}`, label: 'New kitchen flag', scope: 'kitchen', severity: 'minor' }
-      : { id: `flag_${Date.now()}`, label: 'New individual flag', scope: 'individual' }
+      : { id: `flag_${Date.now()}`, label: 'New individual flag', scope: 'individual', severity: 'minor' }
     update([...(flags ?? []), flag])
   }
 
@@ -283,8 +283,8 @@ function GradingSection() {
         <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Lab flags</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
           The checklist you tap when grading a lab. A clean kitchen scores the top;
-          each kitchen flag lowers the score (a Major counts about twice a Minor), and each individual flag drops
-          that one student one tier. Renaming or re-rating a flag also updates labs you have already graded.
+          each kitchen flag lowers the score (a Major counts about twice a Minor), and each individual flag lowers
+          that one student's score the same way — a Minor one tier, a Major two. Renaming or re-rating a flag also updates labs you have already graded.
         </p>
       </div>
 
@@ -315,11 +315,16 @@ function GradingSection() {
           </div>
 
           <div className="space-y-2">
-            <FieldLabel>Individual flags — apply to one student (each drops one tier)</FieldLabel>
+            <FieldLabel>Individual flags — apply to one student (Minor drops one tier, Major two)</FieldLabel>
             <div className="space-y-2">
               {individual.map(f => (
                 <div key={f.id} className="flex items-center gap-2">
                   <TextField value={f.label} onChange={v => setLabel(f.id, v)} aria-label="Flag label" className="flex-1" />
+                  <div className="segmented-control shrink-0">
+                    {[['minor', 'Minor'], ['critical', 'Major']].map(([val, lbl]) => (
+                      <button key={val} aria-pressed={(f.severity ?? 'minor') === val} onClick={() => setSeverity(f.id, val)}>{lbl}</button>
+                    ))}
+                  </div>
                   <button onClick={() => removeFlag(f.id)} aria-label={`Remove ${f.label}`}
                     className="shrink-0 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
                     <X size={16} />
