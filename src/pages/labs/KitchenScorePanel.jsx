@@ -132,10 +132,18 @@ export default function KitchenScorePanel({
   // useCallback keeps this reference stable across re-renders so memoized
   // StudentRows do not all re-render on every keystroke (the onApply prop would
   // otherwise change identity each render and defeat the memo).
-  const applySection = useCallback((next) => {
-    setSection(next)
-    clearTimeout(autosaveTimer.current)
-    autosaveTimer.current = setTimeout(() => { saveDraft(labId, sectionId, next) }, 600)
+  //
+  // Takes an UPDATER (section => newSection), applied to the latest state. A
+  // memoized row only re-renders when its own student changes, so the `section`
+  // it last saw is stale; building the new section from that snapshot silently
+  // erased every other student's edits since (kitchen assignments vanishing).
+  const applySection = useCallback((update) => {
+    setSection(prev => {
+      const next = update(prev)
+      clearTimeout(autosaveTimer.current)
+      autosaveTimer.current = setTimeout(() => { saveDraft(labId, sectionId, next) }, 600)
+      return next
+    })
   }, [labId, sectionId])
 
   function resumeDraft() {
@@ -344,7 +352,7 @@ export default function KitchenScorePanel({
                 {/* Bauhaus: a bold numbered header block. */}
                 <div className="flex items-center justify-between gap-3 px-4 py-2 bg-[var(--color-bg-hover)] border-b-2 border-[var(--color-border-strong)]">
                   <h3 className="text-sm font-bold text-[var(--color-text-body)]">Kitchen {k}</h3>
-                  <Chip tone="exceeded" active={exceeded} onClick={() => applySection(setKitchenExceeded(section, k, !exceeded))}>
+                  <Chip tone="exceeded" active={exceeded} onClick={() => applySection(s => setKitchenExceeded(s, k, !exceeded))}>
                     Exceeded ({maxScore})
                   </Chip>
                 </div>
@@ -356,12 +364,12 @@ export default function KitchenScorePanel({
                       options={kitchenFlagOptions}
                       selectedIds={kflags}
                       toneFor={kitchenTone}
-                      onToggle={id => applySection(toggleKitchenFlag(section, k, id))}
+                      onToggle={id => applySection(s => toggleKitchenFlag(s, k, id))}
                     />
                     {kflags.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {kflags.map(id => (
-                          <Chip key={id} tone={kitchenTone(id)} active onClick={() => applySection(toggleKitchenFlag(section, k, id))} title="Remove">
+                          <Chip key={id} tone={kitchenTone(id)} active onClick={() => applySection(s => toggleKitchenFlag(s, k, id))} title="Remove">
                             {byId[id]?.label ?? id} ✕
                           </Chip>
                         ))}
@@ -463,7 +471,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         const on = (st.libraryComments ?? []).includes(c)
         return (
           <Chip key={c} tone="note" active={on}
-            onClick={() => onApply(toggleStudentLibraryComment(section, student.userId, c))}
+            onClick={() => onApply(s => toggleStudentLibraryComment(s, student.userId, c))}
             title={on ? 'Remove this comment' : 'Add this comment'}>
             {c}
           </Chip>
@@ -489,7 +497,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
         <Button size="sm" variant={absent ? 'danger' : 'success'}
-          onClick={() => onApply(setPresent(section, student.userId, absent))}>
+          onClick={() => onApply(s => setPresent(s, student.userId, absent))}>
           {absent ? 'Absent' : 'Present'}
         </Button>
         {/* Collapsed-on-phone hint that flags exist underneath. */}
@@ -501,19 +509,19 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         <div className={`${open ? 'contents' : 'hidden'} md:contents`}>
           {!absent && (
             <Chip tone="exceeded" active={!!st.exceeded}
-              onClick={() => onApply(setStudentExceeded(section, student.userId, !st.exceeded))}
+              onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
               title={`Mark this student as exceeding expectations (${maxScore})`}>Exceeds</Chip>
           )}
           {absent && (
             <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
               <input type="checkbox" checked={!!st.excused}
-                onChange={() => onApply({ ...section, students: { ...section.students, [student.userId]: { ...st, excused: !st.excused } } })} />
+                onChange={() => onApply(s => ({ ...s, students: { ...s.students, [student.userId]: { ...s.students[student.userId], excused: !st.excused } } }))} />
               Excused
             </label>
           )}
           <Select
             value={st.kitchen == null ? '' : String(st.kitchen)}
-            onChange={v => onApply(setStudentKitchen(section, student.userId, v === '' ? null : Number(v)))}
+            onChange={v => onApply(s => setStudentKitchen(s, student.userId, v === '' ? null : Number(v)))}
             className={`${st.kitchen == null ? 'w-36' : 'w-24'} shrink-0`}
             options={[
               { value: '', label: 'No kitchen' },
@@ -525,14 +533,14 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
               title={`${student.userName} — add flags`}
               options={individualFlags}
               selectedIds={st.flagIds}
-              onToggle={id => onApply(toggleStudentFlag(section, student.userId, id))}
+              onToggle={id => onApply(s => toggleStudentFlag(s, student.userId, id))}
             />
           )}
           <div className="w-full md:flex-1 md:min-w-[14rem] flex items-center gap-1">
             <input
               type="text"
               value={st.comment ?? ''}
-              onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
+              onChange={e => onApply(s => setStudentComment(s, student.userId, e.target.value))}
               placeholder="Comment (optional)"
               aria-label={`Comment for ${student.userName}`}
               className="flex-1 min-w-0 text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)]"
@@ -560,7 +568,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
       {!absent && st.flagIds.length > 0 && (
         <div className={`${open ? 'flex' : 'hidden'} md:flex flex-wrap gap-1 md:pl-36`}>
           {st.flagIds.map(id => (
-            <Chip key={id} tone="individual" active onClick={() => onApply(toggleStudentFlag(section, student.userId, id))} title="Remove">
+            <Chip key={id} tone="individual" active onClick={() => onApply(s => toggleStudentFlag(s, student.userId, id))} title="Remove">
               {flagsById[id]?.label ?? id} ✕
             </Chip>
           ))}
@@ -575,7 +583,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
           <textarea
             autoFocus
             value={st.comment ?? ''}
-            onChange={e => onApply(setStudentComment(section, student.userId, e.target.value))}
+            onChange={e => onApply(s => setStudentComment(s, student.userId, e.target.value))}
             placeholder="Write a comment for this student"
             className="w-full h-48 text-sm px-3 py-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)]"
           />
