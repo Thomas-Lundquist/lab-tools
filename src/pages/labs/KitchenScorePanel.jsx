@@ -947,16 +947,20 @@ export function fmtDateRange(dates) {
   return `${month(first)} ${first.getDate()}–${month(last)} ${last.getDate()}`
 }
 
-// Present / Absent as one switch: green and "Present", or red and "Absent".
-// Only the current state's word shows; the knob slides to the other side.
+// Present / Absent as a block slider, in the app's Bauhaus style: a square-cornered
+// bar with the heavy border, solid green ("PRESENT") or red ("ABSENT"), and a
+// solid block that sits at one end and slides across on tap. Only the current
+// state's word shows.
 function AttendanceSwitch({ absent, name, onToggle }) {
   return (
     <button type="button" role="switch" aria-checked={!absent} onClick={onToggle}
       aria-label={`${name}: ${absent ? 'absent' : 'present'}. Tap to mark ${absent ? 'present' : 'absent'}.`}
-      className={`relative shrink-0 inline-flex items-center w-[6.25rem] h-8 rounded-full transition-colors duration-150 ${
+      className={`relative shrink-0 w-[7rem] h-8 overflow-hidden rounded-[var(--radius-control)] border-2 border-[var(--color-border-strong)] transition-colors duration-150 ${
         absent ? 'bg-[var(--color-danger-fill)]' : 'bg-[var(--color-success-fill)]'}`}>
-      <span className={`absolute top-1 w-6 h-6 rounded-full bg-[var(--color-bg-surface)] transition-[left] duration-150 ${absent ? 'left-1' : 'left-[calc(100%-1.75rem)]'}`} />
-      <span className={`w-full text-xs font-semibold text-white ${absent ? 'pl-8 pr-2 text-right' : 'pl-3 pr-8 text-left'}`}>
+      <span aria-hidden="true"
+        className={`absolute inset-y-0 w-7 bg-[var(--color-border-strong)] transition-[left] duration-150 ${absent ? 'left-0' : 'left-[calc(100%-1.75rem)]'}`} />
+      <span className={`absolute inset-y-0 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-white ${
+        absent ? 'left-7 right-0' : 'left-0 right-7'}`}>
         {absent ? 'Absent' : 'Present'}
       </span>
     </button>
