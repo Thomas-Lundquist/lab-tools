@@ -1,9 +1,10 @@
 // Which periods still need committing. Pure, so it's unit-tested.
 //
-// A period is "due" when its lab date for that period has come (today or
-// earlier, within the last `days` days) and it has no commit, or has unsaved
-// edits since its commit. Only periods with a lab date count: a lab with no
-// date for a period isn't scheduled there.
+// A period is "due" when its lab date for that period has fully passed
+// (strictly before today, within the last `days` days) and it has no commit,
+// or has unsaved edits since its commit. A lab dated today isn't due yet —
+// the day isn't over. Only periods with a lab date count: a lab with no date
+// for a period isn't scheduled there.
 
 import { periodStatus } from '../../storage/labGrading.js'
 
@@ -25,7 +26,7 @@ export function uncommittedPeriods(entries, labStates, sections, today, days = 7
   const out = []
   for (const e of entries) {
     for (const [sectionId, date] of Object.entries(e.dates ?? {})) {
-      if (!date || date > today || date < from || !nameOf[sectionId]) continue
+      if (!date || date >= today || date < from || !nameOf[sectionId]) continue
       const status = periodStatus(labStates[e.id]?.[sectionId])
       if (status === 'done') continue
       out.push({ labId: e.id, labName: e.name, sectionId, sectionName: nameOf[sectionId], date, status })

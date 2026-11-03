@@ -507,7 +507,7 @@ export default function KitchenScorePanel({
                 {gradeableSections.map(s => {
                   const st = statuses[s.id]
                   const date = entry?.dates?.[s.id]
-                  const overdue = st !== 'done' && date && date <= localToday()
+                  const overdue = st !== 'done' && date && date < localToday()
                   const on = s.id === sectionId
                   return (
                     <button key={s.id} type="button" role="radio" aria-checked={on} onClick={() => onSelect(labId, s.id)}

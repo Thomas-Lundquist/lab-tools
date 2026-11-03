@@ -5,10 +5,15 @@ import { uncommittedPeriods } from './periodStatus.js'
 const sections = [{ id: 's1', name: '1A' }, { id: 's2', name: '2A' }, { id: 's3', name: '2B' }]
 
 test('lists periods whose lab day has come but are not committed', () => {
-  const entries = [{ id: 'L', name: 'Thickener Activity Professionalism', dates: { s1: '2026-11-02', s2: '2026-11-02', s3: '2026-11-03' } }]
+  const entries = [{ id: 'L', name: 'Thickener Activity Professionalism', dates: { s1: '2026-11-01', s2: '2026-11-01', s3: '2026-11-02' } }]
   const states = { L: { s1: { committed: { students: {} }, draft: null }, s2: { committed: null, draft: { students: {} } } } }
   const due = uncommittedPeriods(entries, states, sections, '2026-11-02')
-  assert.deepEqual(due.map(d => [d.sectionName, d.status]), [['2A', 'draft']], '1A is committed; 2B is tomorrow')
+  assert.deepEqual(due.map(d => [d.sectionName, d.status]), [['2A', 'draft']], '1A is committed; 2B is today, not due yet')
+})
+
+test("a lab dated today is not due until the day has passed", () => {
+  const entries = [{ id: 'L', name: 'X', dates: { s1: '2026-11-02' } }]
+  assert.deepEqual(uncommittedPeriods(entries, {}, sections, '2026-11-02'), [])
 })
 
 test('a commit with edits since still counts as not committed', () => {
