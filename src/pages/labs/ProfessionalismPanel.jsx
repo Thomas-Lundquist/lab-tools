@@ -17,7 +17,8 @@ import { NotFoundError } from '../../api/errors.js'
 import { createOverride, updateOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
 import { getCourseSetup, getLabs, saveLab, deleteLab, isStandalone } from '../../storage/setup.js'
-import { clearAllLabGrading } from '../../storage/labGrading.js'
+import { clearAllLabGrading, getAllLabGrading } from '../../storage/labGrading.js'
+import { loadJournalUndo, runJournalUndo } from './labRemoval.js'
 import { isProfessionalismAssignment } from './scoring.js'
 
 // JournalSelect sentinel for "no journal — standalone". The primary form
@@ -383,7 +384,8 @@ function EntryList({ entries, assignments, modules, courseId, sections, courseSe
 
   return (
     <div className="space-y-3">
-      {entries.length > 5 && (
+      {/* Shown while a filter is on, too, so it can always be cleared. */}
+      {(entries.length > 5 || q || unitId) && (
         <div className="flex flex-wrap gap-2">
           <TextField value={query} onChange={setQuery} placeholder="Search" aria-label="Search Professionalism assignments" className="flex-1 min-w-[10rem] max-w-sm" />
           {usedModules.length > 0 && (
@@ -419,21 +421,32 @@ function EntryList({ entries, assignments, modules, courseId, sections, courseSe
   )
 }
 
+// Entries saved before `origin` was recorded: a linked one has no journal and
+// no lab dates; anything else was most likely created here, but can't be told
+// apart from a reused one, so it is never assumed.
+function entryOrigin(entry) {
+  if (entry.origin) return entry.origin
+  return !entry.journalAssignmentId && Object.keys(entry.dates ?? {}).length === 0 ? 'linked' : 'unknown'
+}
+
 // Delete a tracked assignment: from Canvas too (the assignment and its scores),
-// or from Lab Tools only. Either way the lab's saved grading here goes with it.
-// The journal is never touched. Assignments linked or reused rather than made
-// here default to "Lab Tools only", since someone made them by hand in Canvas.
+// or from Lab Tools only. Deleting from Canvas also offers to undo what the
+// lab's commits did to the journal (absent students' zeros and locks), since
+// no Revert is left to do it. Only an assignment Lab Tools created starts on
+// "Delete from Canvas". Both paths are PIN-gated and audit-logged.
 function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onRemoved }) {
   const toast = useToast()
   const { requirePin } = usePinGate()
   const professionalism = assignments.find(a => a.id === entry.professionalismAssignmentId)
   const journal = assignments.find(a => a.id === entry.journalAssignmentId)
   const name = professionalism?.name ?? entry.name
-  const madeHere = entry.origin !== 'linked' && entry.origin !== 'reused'
+  const origin = entryOrigin(entry)
   const inCanvas = !!professionalism
-  const [choice, setChoice] = useState(inCanvas && madeHere ? 'delete' : 'unlink')
-  const [graded, setGraded] = useState(null) // students with a score or excused in Canvas; -1 = unknown
-  const [busy, setBusy]     = useState(false)
+  const [choice, setChoice]     = useState(inCanvas && origin === 'created' ? 'delete' : 'unlink')
+  const [graded, setGraded]     = useState(null) // students with a score or excused; -1 = couldn't check
+  const [journalOps, setJournalOps] = useState(null) // journal zeros/locks to undo; null = loading
+  const [undoJournal, setUndoJournal] = useState(true)
+  const [busy, setBusy]         = useState(false)
 
   useEffect(() => {
     if (!inCanvas) return
@@ -441,11 +454,16 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
     getAssignmentSubmissions(courseId, entry.professionalismAssignmentId)
       .then(subs => { if (!cancelled) setGraded(subs.filter(s => s.score != null || s.excused).length) })
       .catch(() => { if (!cancelled) setGraded(-1) })
+    getAllLabGrading(entry.id)
+      .then(state => loadJournalUndo(courseId, entry.journalAssignmentId, state))
+      .then(ops => { if (!cancelled) setJournalOps(ops) })
+      .catch(() => { if (!cancelled) setJournalOps([]) })
     return () => { cancelled = true }
-  }, [inCanvas, courseId, entry.professionalismAssignmentId])
+  }, [inCanvas, courseId, entry.id, entry.professionalismAssignmentId, entry.journalAssignmentId])
 
   async function remove(fromCanvas) {
     setBusy(true)
+    let journalFailed = 0
     try {
       if (fromCanvas) {
         try {
@@ -453,35 +471,51 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
         } catch (err) {
           if (!(err instanceof NotFoundError)) throw err // already gone counts as done
         }
+        if (undoJournal && journalOps?.length) ({ failed: journalFailed } = await runJournalUndo(courseId, entry, journalOps))
       }
-      await deleteLab(entry.id)
-      await clearAllLabGrading(entry.id)
-      toast(fromCanvas ? `Deleted "${name}" from Canvas` : `Removed "${name}" from Lab Tools. It's still in Canvas.`, 'success')
-      onRemoved(entry, fromCanvas)
     } catch (err) {
       toast(`Could not delete "${name}": ${err.message}`, 'error')
+      setBusy(false)
+      return
+    }
+    // Canvas is done. A local failure from here on must not read as "nothing happened".
+    try {
+      await deleteLab(entry.id)
+      // The lab's saved grading is cleared only when its scores are gone from
+      // Canvas too. "Lab Tools only" keeps it, so the record of what was posted survives.
+      if (fromCanvas) await clearAllLabGrading(entry.id)
+      if (journalFailed) toast(`Deleted "${name}", but ${journalFailed} journal change${journalFailed === 1 ? '' : 's'} could not be undone. Details: Settings › Testing › Diagnostics`, 'warning')
+      else toast(fromCanvas ? `Deleted "${name}" from Canvas` : `Removed "${name}" from Lab Tools. It's still in Canvas.`, 'success')
+    } catch (err) {
+      toast(`${fromCanvas ? `Deleted "${name}" from Canvas, but` : 'But'} Lab Tools couldn't update its own records: ${err.message}. It may reappear in the list.`, 'warning')
     } finally {
       setBusy(false)
     }
+    onRemoved(entry, fromCanvas)
   }
 
   async function confirm() {
-    if (choice !== 'delete') { await remove(false); return }
+    const deleting = choice === 'delete'
+    const scoreWarning = graded > 0 ? `${graded} student${graded === 1 ? ' has a score' : 's have scores'} on it.`
+      : graded === -1 ? 'Couldn’t check for scores; it may have some.' : undefined
     try {
       await requirePin(
         {
-          action: 'delete_professionalism_assignment',
-          summary: `Delete "${name}" from ${courseName}`,
+          action: deleting ? 'delete_professionalism_assignment' : 'untrack_professionalism_assignment',
+          summary: deleting ? `Delete "${name}" from ${courseName}` : `Remove "${name}" from Lab Tools in ${courseName}`,
           courseId, courseName,
-          warning: graded > 0 ? `${graded} student${graded === 1 ? ' has a score' : 's have scores'} on it.` : undefined,
+          warning: deleting ? scoreWarning : undefined,
         },
-        () => remove(true),
-        { forcePrompt: true },
+        () => remove(deleting),
+        { forcePrompt: deleting },
       )
     } catch (err) {
       toast(err.message, 'error')
     }
   }
+
+  const journalCount = journalOps?.length ?? 0
+  const checking = choice === 'delete' && (graded === null || journalOps === null)
 
   return (
     <Modal
@@ -489,7 +523,7 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
       onClose={() => !busy && onClose()}
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant={choice === 'delete' ? 'danger' : 'primary'} onClick={confirm} disabled={busy || (choice === 'delete' && graded === null)}>
+        <Button variant={choice === 'delete' ? 'danger' : 'primary'} onClick={confirm} disabled={busy || checking}>
           <span className="flex items-center gap-1.5">
             {busy && <Loader size={13} className="animate-spin" />}
             {choice === 'delete' ? 'Delete from Canvas' : 'Remove from Lab Tools'}
@@ -504,15 +538,30 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
             <span>
               <strong className="text-[var(--color-text-body)]">Delete from Canvas too.</strong>{' '}
               The assignment and every score on it are removed from the gradebook.
-              {!madeHere && <span className="block text-xs text-[var(--color-text-muted)] mt-1">This one was {entry.origin === 'linked' ? 'linked' : 'reused'}, not created by Lab Tools.</span>}
+              {origin !== 'created' && (
+                <span className="block text-xs text-[var(--color-text-muted)] mt-1">
+                  {origin === 'unknown' ? 'Lab Tools can’t tell whether it created this one or reused one made in Canvas.' : `This one was ${origin}, not created by Lab Tools.`}
+                </span>
+              )}
               {graded === null && <span className="block text-xs text-[var(--color-text-muted)] mt-1">Checking Canvas for scores…</span>}
-              {graded > 0 && (
+              {(graded > 0 || graded === -1) && (
                 <span className="flex items-start gap-1.5 mt-1 text-[var(--color-warning)]">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                  {graded} student{graded === 1 ? ' has a score' : 's have scores'} on it. Those are deleted too.
+                  {graded > 0
+                    ? <>{graded} student{graded === 1 ? ' has a score' : 's have scores'} on it. Those are deleted too.</>
+                    : <>Couldn’t check Canvas for scores. Assume it has some.</>}
                 </span>
               )}
               {graded === 0 && <span className="block text-xs text-[var(--color-text-muted)] mt-1">No student has a score on it yet.</span>}
+            </span>
+          </label>
+        )}
+        {choice === 'delete' && journalCount > 0 && (
+          <label className="flex items-start gap-2 ml-6">
+            <input type="checkbox" checked={undoJournal} onChange={e => setUndoJournal(e.target.checked)} className="mt-1" />
+            <span>
+              Also undo this lab’s absences on the journal{journal ? <> &ldquo;{journal.name}&rdquo;</> : null} for {journalCount} student{journalCount === 1 ? '' : 's'}: clear the journal zero and remove the lock.
+              <span className="block text-xs text-[var(--color-text-muted)] mt-1">A journal with a real score is left alone.</span>
             </span>
           </label>
         )}
@@ -520,14 +569,10 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
           <input type="radio" name="remove-choice" checked={choice === 'unlink'} onChange={() => setChoice('unlink')} className="mt-1" />
           <span>
             <strong className="text-[var(--color-text-body)]">Remove from Lab Tools only.</strong>{' '}
-            Canvas keeps the assignment and its scores. It leaves this list, the Lab tab, and Unit rollups.
+            Canvas keeps the assignment, its scores, and any journal zeros and locks. It leaves this list, the Lab tab, and Unit rollups.
             {!inCanvas && <span className="block text-xs text-[var(--color-text-muted)] mt-1">It’s already gone from Canvas.</span>}
           </span>
         </label>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Either way, the grading Lab Tools saved for this lab is cleared
-          {journal ? <>. The journal &ldquo;{journal.name}&rdquo; is not touched, and its dates stay</> : null}.
-        </p>
       </div>
     </Modal>
   )

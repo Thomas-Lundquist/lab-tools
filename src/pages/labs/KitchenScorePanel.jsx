@@ -21,11 +21,12 @@ import {
   deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
-import { seedStandingKitchens, saveStandingKitchen } from '../../storage/kitchens.js'
+import { seedStandingKitchens, saveStandingKitchen, isLatestLab } from '../../storage/kitchens.js'
 import { planCommit, buildSection } from './commitPlan.js'
-import { runCommit, runRevert } from './commitRun.js'
+import { runCommit, runRevert, planRevert } from './commitRun.js'
 
-// Every lab room has eight kitchens.
+// Every lab room has eight kitchens. A lab saved when the count was adjustable
+// may reference more, so the screen shows up to the highest one in use.
 const KITCHEN_COUNT = 8
 
 
@@ -60,7 +61,9 @@ export default function KitchenScorePanel({
 
   const [pendingDraft, setPendingDraft] = useState(null) // the stored state when an unsaved draft exists
   const [confirming, setConfirming]   = useState(false)
-  const [preview, setPreview]         = useState(null) // { plan } | { error } while confirming
+  const [preview, setPreview]         = useState(null) // { plan, canvas } | { error } while confirming
+  const [overwrite, setOverwrite]     = useState(() => new Set()) // students changed in Canvas to overwrite anyway
+  const [revertPreview, setRevertPreview] = useState(null) // { changed } | { error } while the revert confirm is open
   const [reverting, setReverting]     = useState(false) // revert confirm open
   const [saving, setSaving]           = useState(false)
   const [progress, setProgress]       = useState('')
@@ -105,7 +108,7 @@ export default function KitchenScorePanel({
       getEnrollments(courseId),
       getAssignmentSubmissions(courseId, entry.professionalismAssignmentId, { includeComments: true }),
       getLabGrading(labId, sectionId),
-      seedStandingKitchens(courseId, sectionId, entries.map(e => e.id)),
+      seedStandingKitchens(courseId, sectionId, entries.map(e => e.id)), // never rejects
     ])
       .then(([enrollments, profSubs, storedState, standingKitchens]) => {
         if (cancelled) return
@@ -161,11 +164,15 @@ export default function KitchenScorePanel({
   }, [labId, sectionId])
 
   // Moving a student also moves their usual kitchen, so the next lab for this
-  // period starts with the latest arrangement.
+  // period starts with the latest arrangement. A fix to an older lab doesn't.
+  const latestLab = !!entry && isLatestLab(entry, entries, sectionId)
   const assignKitchen = useCallback((studentId, kitchen) => {
     applySection(s => setStudentKitchen(s, studentId, kitchen))
-    saveStandingKitchen(courseId, sectionId, studentId, kitchen)
-  }, [applySection, courseId, sectionId])
+    if (latestLab) {
+      saveStandingKitchen(courseId, sectionId, studentId, kitchen)
+        .catch(err => toast(`Couldn't save the usual kitchen: ${err.message}`, 'warning'))
+    }
+  }, [applySection, courseId, sectionId, latestLab, toast])
 
   function resumeDraft() {
     const draft = buildSection(roster, pendingDraft.draft, profState, standing)
@@ -205,8 +212,10 @@ export default function KitchenScorePanel({
     }
   }
 
-  function buildPlan(canvas) {
+  function buildPlan(canvas, overwriteIds = overwrite) {
     return planCommit({
+      posted: stored?.posted ?? {},
+      overwrite: overwriteIds,
       roster, section, prior: stored?.committed ?? null, canvas,
       ids: { courseId, profId: entry.professionalismAssignmentId, journalId: entry.journalAssignmentId ?? null },
       settings: {
@@ -221,12 +230,23 @@ export default function KitchenScorePanel({
   async function openPreview() {
     setConfirming(true)
     setPreview(null)
+    const none = new Set()
+    setOverwrite(none)
     try {
       const canvas = await loadCanvasSnapshot()
-      setPreview({ plan: buildPlan(canvas) })
+      setPreview({ plan: buildPlan(canvas, none), canvas })
     } catch (err) {
       setPreview({ error: err.message })
     }
+  }
+
+  // Overwrite toggle on a student changed in Canvas: re-plan from the same snapshot.
+  function toggleOverwrite(userId) {
+    const next = new Set(overwrite)
+    if (next.has(userId)) next.delete(userId)
+    else next.add(userId)
+    setOverwrite(next)
+    if (preview?.canvas) setPreview({ ...preview, plan: buildPlan(preview.canvas, next) })
   }
 
   async function doCommit() {
@@ -242,7 +262,13 @@ export default function KitchenScorePanel({
       })
       // A partly failed commit keeps the draft, so the period still reads as
       // unsaved and the resume prompt offers a retry for the students that failed.
-      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0 })
+      // What Canvas now holds for each student this commit confirmed: the next
+      // commit compares against it to spot changes made in Canvas.
+      const failed = new Set(failures.map(f => f.userId))
+      const posted = Object.fromEntries(plan.students
+        .filter(s => s.after && !failed.has(s.userId))
+        .map(s => [s.userId, { prof: s.after }]))
+      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0, posted })
       setStored(nextStored)
       setPendingDraft(null)
       await refreshScores()
@@ -251,7 +277,8 @@ export default function KitchenScorePanel({
         const names = failures.slice(0, 3).map(f => f.userName ?? 'a student').join(', ')
         toast(`${failures.length} of ${plan.students.length} didn't save (${names}${failures.length > 3 ? '…' : ''}). Your work is kept — commit again to retry. Details: Settings › Testing › Diagnostics`, 'warning')
       } else {
-        toast(`Committed ${plan.students.length} student${plan.students.length === 1 ? '' : 's'} for ${entry.name}`, 'success')
+        const held = plan.summary.held
+        toast(`Committed ${entry.name}${held ? `. ${held} student${held === 1 ? '' : 's'} changed in Canvas left as is` : ''}`, 'success')
       }
       onChanged?.()
     } catch (err) {
@@ -262,16 +289,41 @@ export default function KitchenScorePanel({
     }
   }
 
+  // What Canvas holds now, to spot scores changed there since the commit.
+  async function loadRevertCheck() {
+    const journalId = entry.journalAssignmentId
+    const [profSubs, journalSubs] = await Promise.all([
+      getAssignmentSubmissions(courseId, entry.professionalismAssignmentId),
+      journalId ? getAssignmentSubmissions(courseId, journalId) : null,
+    ])
+    const toMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
+    return planRevert(stored.lastCommit.record, { prof: toMap(profSubs), journal: journalSubs ? toMap(journalSubs) : null })
+  }
+
+  async function openRevert() {
+    setReverting(true)
+    setRevertPreview(null)
+    setOverwrite(new Set())
+    try {
+      setRevertPreview({ changed: (await loadRevertCheck()).changed })
+    } catch (err) {
+      setRevertPreview({ error: err.message })
+    }
+  }
+
   async function doRevert() {
     clearTimeout(autosaveTimer.current)
     setSaving(true)
     try {
       const names = Object.fromEntries(roster.map(r => [r.userId, r.userName]))
+      // Re-check right before writing; skip changed students not set to Overwrite.
+      const { changed } = await loadRevertCheck()
+      const skip = new Set(changed.map(c => c.userId).filter(id => !overwrite.has(id)))
       const { failures } = await runRevert(stored.lastCommit.record, {
-        courseId, entry, names,
+        courseId, entry, names, skip,
         onProgress: (done, total) => setProgress(`${done} of ${total} students restored…`),
       })
-      const nextStored = await revertLabGrading(labId, sectionId)
+      const nextStored = await revertLabGrading(labId, sectionId, { skipped: skip })
       setStored(nextStored)
       // The reverted work is now a draft — offer it like any saved work.
       setSection(buildSection(roster, nextStored.committed, profState, standing))
@@ -279,7 +331,7 @@ export default function KitchenScorePanel({
       await refreshScores()
       setReverting(false)
       if (failures.length) toast(`Reverted, but ${failures.length} student${failures.length === 1 ? '' : 's'} could not be restored. Details: Settings › Testing › Diagnostics`, 'warning')
-      else toast(`Reverted the last commit for ${entry.name}. Your grading is kept as a draft.`, 'success')
+      else toast(`Reverted the last commit for ${entry.name}${skip.size ? `, leaving ${skip.size} changed in Canvas as is` : ''}. Your grading is kept as a draft.`, 'success')
       onChanged?.()
     } catch (err) {
       toast(`Could not revert: ${err.message}`, 'error')
@@ -352,7 +404,8 @@ export default function KitchenScorePanel({
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null
   })
-  const kitchenNumbers = Array.from({ length: KITCHEN_COUNT }, (_, i) => i + 1)
+  const kitchenCount = highestKitchen(section)
+  const kitchenNumbers = Array.from({ length: kitchenCount }, (_, i) => i + 1)
   const unassigned = roster.filter(s => section.students[s.userId]?.kitchen == null)
 
   return (
@@ -461,7 +514,7 @@ export default function KitchenScorePanel({
                     )}
                     {members.map(s => (
                       <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                        kitchenCount={KITCHEN_COUNT} commentLibrary={commentLibrary} maxScore={maxScore}
+                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
                         flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                     ))}
                   </div>
@@ -479,7 +532,7 @@ export default function KitchenScorePanel({
               <div className="px-4 py-2 divide-y divide-[var(--color-border-subtle)]">
                 {unassigned.map(s => (
                   <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                    kitchenCount={KITCHEN_COUNT} commentLibrary={commentLibrary} maxScore={maxScore}
+                    kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
                     flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                 ))}
               </div>
@@ -489,11 +542,11 @@ export default function KitchenScorePanel({
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p className="text-xs text-[var(--color-text-muted)]">
               Edits autosave on this device. Nothing posts to Canvas until you commit.
-              Kitchen placements carry over to this period’s next lab.
+              {latestLab ? 'Kitchen placements carry over to this period’s next lab.' : 'This is an older lab: kitchen changes here stay with this lab.'}
             </p>
             <div className="flex flex-wrap gap-2">
               {stored?.lastCommit && (
-                <Button variant="ghost" icon={Undo2} onClick={() => setReverting(true)}>
+                <Button variant="ghost" icon={Undo2} onClick={openRevert}>
                   Revert last commit ({fmtWhen(stored.lastCommit.at)})
                 </Button>
               )}
@@ -516,7 +569,7 @@ export default function KitchenScorePanel({
             </Button>
           </>}
         >
-          <CommitPreview preview={preview} presentUnassigned={presentUnassigned.length} entry={entry} />
+          <CommitPreview preview={preview} presentUnassigned={presentUnassigned.length} entry={entry} onToggleOverwrite={toggleOverwrite} />
           {saving && progress && <p className="text-xs text-[var(--color-text-muted)] mt-2">{progress}</p>}
         </Modal>
       )}
@@ -527,7 +580,7 @@ export default function KitchenScorePanel({
           onClose={() => !saving && setReverting(false)}
           footer={<>
             <Button variant="secondary" onClick={() => setReverting(false)} disabled={saving}>Cancel</Button>
-            <Button variant="danger" onClick={handleRevert} disabled={saving}>
+            <Button variant="danger" onClick={handleRevert} disabled={saving || !revertPreview || !!revertPreview.error}>
               <span className="flex items-center gap-1.5">{saving && <Loader size={13} className="animate-spin" />}Revert</span>
             </Button>
           </>}
@@ -539,7 +592,15 @@ export default function KitchenScorePanel({
               scores and excused marks restored, comments it posted deleted, and journal locks it added removed (or ones it removed put back).
             </p>
             <p>Your grading from that commit comes back as a draft, so you can fix it and commit again.</p>
-            <p className="text-xs text-[var(--color-text-muted)]">If a score was changed in Canvas by hand since, Revert overwrites it with the value from before the commit.</p>
+            {!revertPreview && <p className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]"><Loader size={12} className="animate-spin" />Checking Canvas for changes since the commit…</p>}
+            {revertPreview?.error && <p className="text-xs text-[var(--color-error)]">Couldn't check Canvas: {revertPreview.error}</p>}
+            {revertPreview?.changed?.length > 0 && (
+              <ChangedInCanvas
+                students={revertPreview.changed.map(c => ({ ...c, userName: roster.find(r => r.userId === c.userId)?.userName, overwriting: overwrite.has(c.userId) }))}
+                verb="revert"
+                onToggle={id => setOverwrite(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })}
+              />
+            )}
           </div>
           {saving && progress && <p className="text-xs text-[var(--color-text-muted)] mt-2">{progress}</p>}
         </Modal>
@@ -758,6 +819,19 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
   )
 }
 
+// The kitchens to show: always 8, more only if a stored lab uses a higher one.
+function highestKitchen(section) {
+  let max = KITCHEN_COUNT
+  for (const st of Object.values(section?.students ?? {})) {
+    if (typeof st.kitchen === 'number' && st.kitchen > max) max = st.kitchen
+  }
+  for (const k of Object.keys(section?.kitchens ?? {})) {
+    const n = Number(k)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return max
+}
+
 function fmtWhen(iso) {
   if (!iso) return 'earlier'
   try {
@@ -783,7 +857,37 @@ function periodLabel(name, status) {
 }
 
 // The commit preview: exactly what will be sent, from the commit plan.
-function CommitPreview({ preview, presentUnassigned, entry }) {
+// Students whose scores were changed in Canvas since Lab Tools last wrote them
+// (a makeup, a hand edit). Left alone unless the teacher turns on Overwrite.
+function ChangedInCanvas({ students, verb, onToggle }) {
+  return (
+    <div className="rounded-[var(--radius-control)] border-2 border-[var(--color-warning)] p-3 space-y-2">
+      <p className="flex items-start gap-1.5 text-sm font-medium text-[var(--color-text-body)]">
+        <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        Changed in Canvas since Lab Tools last wrote {students.length === 1 ? 'it' : 'them'} ({students.length})
+      </p>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        A makeup or a hand edit. Left as is unless you choose Overwrite{verb === 'revert' ? ', which puts back the score from before the commit' : ''}.
+      </p>
+      <ul className="divide-y divide-[var(--color-border-subtle)]">
+        {students.map(s => (
+          <li key={s.userId} className="py-1.5 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm text-[var(--color-text-body)]">{s.userName ?? 'A student'}</p>
+              {s.outside.map(r => <p key={r} className="text-xs text-[var(--color-text-muted)]">{r}</p>)}
+            </div>
+            <label className="flex items-center gap-1.5 text-xs shrink-0 text-[var(--color-text-secondary)]">
+              <input type="checkbox" checked={!!s.overwriting} onChange={() => onToggle(s.userId)} />
+              Overwrite
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function CommitPreview({ preview, presentUnassigned, entry, onToggleOverwrite }) {
   if (!preview) {
     return <p className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]"><Loader size={14} className="animate-spin" />Checking Canvas…</p>
   }
@@ -792,7 +896,8 @@ function CommitPreview({ preview, presentUnassigned, entry }) {
   }
   const { students, summary } = preview.plan
   const scoreLine = Object.entries(summary.scoreCounts).sort((a, b) => Number(b[0]) - Number(a[0])).map(([v, n]) => `${v} ×${n}`).join(', ')
-  const changing = students.filter(s => s.ops.length)
+  const changing = students.filter(s => s.ops.length && !s.overwriting)
+  const changedInCanvas = students.filter(s => s.outside.length)
   const statusText = s => s.status === 'excused' ? 'Excused (Canvas excused)'
     : s.status === 'absent' ? `Absent — 0${entry.journalAssignmentId ? ', journal locked' : ''}`
       : s.returning ? `${s.score} — back from absent (journal reopened)` : String(s.score)
@@ -800,7 +905,9 @@ function CommitPreview({ preview, presentUnassigned, entry }) {
   return (
     <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
       {summary.writes === 0 ? (
-        <p className="text-[var(--color-text-body)]">Canvas already matches this period — nothing to send.</p>
+        <p className="text-[var(--color-text-body)]">
+          {summary.held ? 'Nothing to send unless you choose Overwrite below.' : 'Canvas already matches this period — nothing to send.'}
+        </p>
       ) : (
         <ul className="space-y-0.5 text-[var(--color-text-body)]">
           {summary.scoresPosted > 0 && <li><strong>{summary.scoresPosted}</strong> score{summary.scoresPosted === 1 ? '' : 's'}: {scoreLine}</li>}
@@ -810,6 +917,9 @@ function CommitPreview({ preview, presentUnassigned, entry }) {
           {summary.returning > 0 && <li><strong>{summary.returning}</strong> back from absent (journal zero cleared, lock removed)</li>}
           {summary.unchanged > 0 && <li className="text-[var(--color-text-muted)]">{summary.unchanged} already up to date — skipped</li>}
         </ul>
+      )}
+      {changedInCanvas.length > 0 && (
+        <ChangedInCanvas students={changedInCanvas} verb="commit" onToggle={onToggleOverwrite} />
       )}
       {summary.blocked > 0 && (
         <p className="flex items-start gap-1.5 text-[var(--color-error)]">

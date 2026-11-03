@@ -21,8 +21,9 @@ const emptyCanvas = (over = {}) => ({
   locks: over.locks ?? {},
 })
 const sectionWith = student => ({ kitchens: { 1: { flagIds: ['k1'] } }, students: { 1: { kitchen: 1, flagIds: [], present: true, ...student } } })
-const plan = (student, canvas = emptyCanvas(), prior = null) =>
-  planCommit({ roster, section: sectionWith(student), prior, canvas, ids, settings, byId }).students[0]
+const plan = (student, canvas = emptyCanvas(), prior = null, extra = {}) =>
+  planCommit({ roster, section: sectionWith(student), prior, canvas, ids, settings, byId, ...extra }).students[0]
+const priorWith = student => ({ kitchens: {}, students: { 1: { kitchen: null, flagIds: [], present: true, ...student } } })
 
 // --- bug 1: resuming keeps every field ---
 
@@ -103,7 +104,7 @@ test('a real journal 0 is left alone for a student who was never committed absen
 
 test('an excused absence excuses professionalism and the journal, and removes an old lock', () => {
   const canvas = emptyCanvas({ prof: { 1: { score: 0, excused: false, comments: [] } }, journal: { 1: { score: 0, excused: false } }, locks: { 1: { id: 'o1' } } })
-  assert.deepEqual(plan({ present: false, excused: true }, canvas).ops, [
+  assert.deepEqual(plan({ present: false, excused: true }, canvas, priorWith({ present: false })).ops, [
     { target: 'prof', fields: { excuse: true } },
     { target: 'journal', fields: { excuse: true } },
     { target: 'lock', action: 'delete', lock: { id: 'o1' } },
@@ -112,7 +113,7 @@ test('an excused absence excuses professionalism and the journal, and removes an
 
 test('an excused student switched to unexcused-absent is un-excused and zeroed', () => {
   const canvas = emptyCanvas({ prof: { 1: { score: null, excused: true, comments: [] } }, journal: { 1: { score: null, excused: true } } })
-  const ops = plan({ present: false }, canvas).ops
+  const ops = plan({ present: false }, canvas, priorWith({ present: false, excused: true })).ops
   assert.deepEqual(ops[0], { target: 'prof', fields: { excuse: false, posted_grade: '0' } })
   assert.deepEqual(ops[1], { target: 'journal', fields: { excuse: false, posted_grade: '0' } })
 })
@@ -147,7 +148,8 @@ const entry = { name: 'Lab 4', professionalismAssignmentId: '20', journalAssignm
 test('runCommit sends the plan and records what Canvas had before', async () => {
   stubFetch(() => ({ id: 77 }))
   const canvas = emptyCanvas({ prof: { 1: { score: 2, excused: false, comments: [] } } })
-  const p = planCommit({ roster, section: sectionWith({ present: false }), prior: null, canvas, ids, settings, byId })
+  const posted = { 1: { prof: { score: 2, excused: false } } }
+  const p = planCommit({ roster, section: sectionWith({ present: false }), prior: null, canvas, ids, settings, byId, posted })
   const { failures, record } = await runCommit(p, { courseId: '10', entry })
   assert.deepEqual(failures, [])
   assert.deepEqual(sent.map(x => `${x.method} ${x.path}`), [
@@ -155,7 +157,7 @@ test('runCommit sends the plan and records what Canvas had before', async () => 
     'PUT /api/v1/courses/10/assignments/30/submissions/1',
     'POST /api/v1/courses/10/assignments/30/overrides',
   ])
-  assert.deepEqual(record.students[1].prof, { before: { score: 2, excused: false }, afterExcused: false })
+  assert.deepEqual(record.students[1].prof, { before: { score: 2, excused: false }, afterExcused: false, after: { score: 0, excused: false } })
   assert.equal(record.students[1].lockCreated, true)
 })
 
@@ -193,4 +195,45 @@ test('a failing student is reported by name and the rest still go out', async ()
   const { failures } = await runCommit(p, { courseId: '10', entry: { ...entry, journalAssignmentId: null } })
   assert.deepEqual(failures.map(f => f.userName), ['Ana'])
   assert.equal(sent.filter(x => x.method === 'PUT').length, 1, 'Bo still saved')
+})
+
+// --- scores changed in Canvas are held, not overwritten ---
+
+test('a makeup typed into Canvas is held: no re-zero, no journal zero, no re-lock', () => {
+  // Committed absent (0 posted, journal locked); the teacher typed a makeup 3
+  // and removed the lock in Canvas. Recommitting the same period must not undo it.
+  const canvas = emptyCanvas({ prof: { 1: { score: 3, excused: false, comments: [] } }, journal: { 1: { score: 0, excused: false } } })
+  const s = plan({ present: false }, canvas, priorWith({ present: false }), { posted: { 1: { prof: { score: 0, excused: false } } } })
+  assert.equal(s.held, true)
+  assert.deepEqual(s.ops, [])
+  assert.ok(s.heldOps.length >= 2, 'the zero and the lock are held, not dropped')
+  assert.ok(s.outside[0].includes('Canvas has 3'))
+  assert.equal(s.after, null)
+})
+
+test('Overwrite sends a held student anyway', () => {
+  const canvas = emptyCanvas({ prof: { 1: { score: 3, excused: false, comments: [] } } })
+  const s = plan({ present: false }, canvas, priorWith({ present: false }), { posted: { 1: { prof: { score: 0, excused: false } } }, overwrite: new Set(['1']) })
+  assert.equal(s.held, false)
+  assert.equal(s.overwriting, true)
+  assert.deepEqual(s.ops[0], { target: 'prof', fields: { posted_grade: '0' } })
+})
+
+test('a hand-entered score with no Lab Tools history is held', () => {
+  const s = plan({}, emptyCanvas({ prof: { 1: { score: 2, excused: false, comments: [] } } }))
+  assert.equal(s.held, true)
+})
+
+test('a score Lab Tools posted itself is not "changed in Canvas"', () => {
+  const canvas = emptyCanvas({ prof: { 1: { score: 4, excused: false, comments: [] } } })
+  const s = plan({}, canvas, priorWith({}), { posted: { 1: { prof: { score: 4, excused: false } } } })
+  assert.equal(s.held, false)
+  assert.equal(s.ops[0].fields.posted_grade, '3')
+})
+
+test('a graded journal is never zeroed without Overwrite', () => {
+  const canvas = emptyCanvas({ journal: { 1: { score: 8, excused: false } } })
+  const s = plan({ present: false }, canvas)
+  assert.equal(s.held, true)
+  assert.ok(s.outside.some(r => r.includes('Journal has 8')))
 })

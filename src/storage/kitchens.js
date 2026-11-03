@@ -2,8 +2,8 @@
 // cooks in, so a new lab starts with everyone already placed instead of every
 // student "Unassigned". A lab's own grading state (labGrading.js) still records
 // the kitchen each student actually had that day — this is only the starting
-// point for labs that haven't been graded yet. Moving a student in any lab
-// updates it (the latest arrangement wins).
+// point for labs that haven't been graded yet. Moving a student updates it,
+// unless the move is a fix to an older lab (isLatestLab).
 //
 // One synced key per course, `kitchens/<courseId>`, shaped
 //   { [sectionId]: { students: { [studentId]: kitchenNo } } }
@@ -30,14 +30,19 @@ export function saveStandingKitchen(courseId, sectionId, studentId, kitchen) {
 
 // A period that has never had standing kitchens is seeded once from its most
 // recently graded lab, so arrangements made before this existed carry forward.
+// An empty result is saved too, so the scan runs only once per period. Never
+// throws: kitchens are a convenience and must not block the roster loading.
 export async function seedStandingKitchens(courseId, sectionId, labIds) {
-  const existing = await getStandingKitchens(courseId, sectionId)
-  if (existing) return existing
-  const states = await Promise.all(labIds.map(id => getLabGrading(id, sectionId)))
-  const seeded = standingFromLatestLab(states)
-  if (!seeded) return null
-  await updatePeriod(courseId, sectionId, () => seeded)
-  return seeded
+  try {
+    const existing = await getStandingKitchens(courseId, sectionId)
+    if (existing) return existing
+    const states = await Promise.all(labIds.map(id => getLabGrading(id, sectionId).catch(() => null)))
+    const seeded = standingFromLatestLab(states) ?? { students: {} }
+    await updatePeriod(courseId, sectionId, () => seeded)
+    return seeded
+  } catch {
+    return null
+  }
 }
 
 // ---- pure (unit-tested) ----
@@ -49,12 +54,14 @@ export function withKitchen(students = {}, studentId, kitchen) {
   return next
 }
 
-// The kitchens from whichever lab state was touched last (draft or commit).
+// The kitchens from whichever lab state was touched last: a live draft by its
+// last edit, otherwise the commit by its commit time. (updatedAt outlives a
+// discarded draft, so it only counts while the draft exists.)
 export function standingFromLatestLab(states) {
   let best = null
   for (const st of states) {
     const sec = st?.draft ?? st?.committed
-    const at = st?.updatedAt ?? st?.committedAt
+    const at = st?.draft ? st.updatedAt : st?.committedAt
     if (!sec || !at) continue
     if (!best || at > best.at) best = { at, sec }
   }
@@ -64,4 +71,24 @@ export function standingFromLatestLab(states) {
     if (typeof s.kitchen === 'number') students[id] = s.kitchen
   }
   return Object.keys(students).length ? { students } : null
+}
+
+// A lab's date for one period: its lab date there, else the day it was added.
+export function labDateFor(entry, sectionId) {
+  const d = entry?.dates?.[sectionId]
+  if (d) return d
+  const ms = Number(String(entry?.id ?? '').replace(/^lab_/, ''))
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : ''
+}
+
+// Whether a kitchen move in this lab should become the period's usual kitchens:
+// yes unless a later lab (up to today; labs set up ahead of time don't count)
+// exists for the period, i.e. this is a fix to an older lab.
+export function isLatestLab(entry, entries, sectionId, today = new Date().toISOString().slice(0, 10)) {
+  const mine = labDateFor(entry, sectionId)
+  return !entries.some(e => {
+    if (e.id === entry.id) return false
+    const d = labDateFor(e, sectionId)
+    return d > mine && d <= today
+  })
 }

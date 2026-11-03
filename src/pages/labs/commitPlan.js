@@ -19,6 +19,14 @@
 //              doesn't count against the grade); any old journal lock is removed.
 // Absent and excused students never get the kitchen's flag summary — only the
 // teacher's own typed or library comments.
+//
+// Scores changed in Canvas are held, not overwritten (DECISIONS.md, 2026-11-02).
+// A makeup score typed into the gradebook, or any other hand edit, means Canvas
+// no longer holds what Lab Tools last posted. Such a student's writes are held
+// back: their ops move to `heldOps`, the preview lists them, and they're sent
+// only if the teacher turns on Overwrite for that student (`overwrite`). The
+// journal and its lock are held with the score, so a made-up lab isn't
+// re-zeroed or re-locked.
 
 import { deriveStudentScore } from '../../storage/labGrading.js'
 import { FLAG_BY_ID } from '../../config/labFlags.js'
@@ -81,6 +89,26 @@ export function buildSection(roster, prior, profState, standing = null) {
 
 const sameScore = (a, b) => a != null && b != null && Number(a) === Number(b)
 
+// What Canvas should hold on the professionalism assignment if nobody touched it
+// since Lab Tools' last commit. `posted` (stored at each commit) is exact. Periods
+// committed before it existed fall back to the last committed flags.
+function expectedProf(postedProf, prior, userId, maxScore, byId) {
+  if (postedProf) return postedProf
+  const p = prior?.students?.[userId]
+  if (!p) return { score: null, excused: false }
+  if (p.present === false) return p.excused ? { score: null, excused: true } : { score: 0, excused: false }
+  return { score: deriveStudentScore(prior, userId, maxScore, byId), excused: false }
+}
+
+export function matchesExpected(canvas, exp) {
+  if (exp.excused) return !!canvas.excused
+  if (canvas.excused) return false
+  return exp.score == null ? canvas.score == null : sameScore(canvas.score, exp.score)
+}
+
+export const showCanvasScore = st => (st.excused ? 'Excused' : st.score == null ? 'blank' : String(st.score))
+const touchesGrade = op => !!op.fields && ('posted_grade' in op.fields || 'excuse' in op.fields)
+
 /**
  * @param roster   [{ userId, userName }]
  * @param section  the working section (what the teacher sees)
@@ -92,8 +120,11 @@ const sameScore = (a, b) => a != null && b != null && Number(a) === Number(b)
  * }
  * @param ids      { courseId, profId, journalId }
  * @param settings { commentsOn, maxScore, zeroJournalWhenAbsent }
+ * @param posted   { [userId]: { prof: { score, excused } } }: what Lab Tools last
+ *                 put on Canvas for each student (storage/labGrading.js), or {}
+ * @param overwrite Set of userIds whose Canvas changes the teacher chose to overwrite
  */
-export function planCommit({ roster, section, prior, canvas, ids, settings, byId = FLAG_BY_ID }) {
+export function planCommit({ roster, section, prior, canvas, ids, settings, byId = FLAG_BY_ID, posted = {}, overwrite = new Set() }) {
   const { commentsOn = false, maxScore = 4, zeroJournalWhenAbsent = true } = settings
   const hasJournal = !!ids.journalId && !!canvas.journal
   const students = []
@@ -105,7 +136,7 @@ export function planCommit({ roster, section, prior, canvas, ids, settings, byId
     const lock = canvas.locks?.[userId] ?? null
     const wasAbsent = prior?.students?.[userId]?.present === false
     const status = st?.present === false ? (st.excused ? 'excused' : 'absent') : 'present'
-    const ops = []
+    let ops = []
     let score = null
     let comment = null
 
@@ -150,6 +181,30 @@ export function planCommit({ roster, section, prior, canvas, ids, settings, byId
       }
     }
 
+    // Changed in Canvas since the last commit? Only matters for a write that
+    // would replace it: a comment alone never conflicts.
+    const outside = []
+    const exp = expectedProf(posted[userId]?.prof, prior, userId, maxScore, byId)
+    if (ops.some(op => op.target === 'prof' && touchesGrade(op)) && !matchesExpected(prof, exp)) {
+      outside.push(`Canvas has ${showCanvasScore(prof)}; Lab Tools last posted ${showCanvasScore(exp)}`)
+    }
+    if (ops.some(op => op.target === 'journal' && touchesGrade(op)) && journal.score != null && !sameScore(journal.score, 0)) {
+      outside.push(`Journal has ${journal.score}`)
+    }
+    const priorSt = prior?.students?.[userId]
+    if (ops.some(op => op.target === 'lock' && op.action === 'create') && priorSt?.present === false && !priorSt.excused) {
+      outside.push('Journal lock was removed in Canvas')
+    }
+    const held = outside.length > 0 && !overwrite.has(userId)
+    const heldOps = held ? ops : []
+    if (held) { ops = []; comment = null }
+
+    // What the professionalism assignment holds once this plan runs (stored as
+    // `posted` after a commit). Unknown while held: Canvas keeps its own value.
+    const after = held ? null
+      : status === 'excused' ? { score: prof.score ?? null, excused: true }
+        : { score, excused: false }
+
     // The same safety checks the writes will run, so the preview shows blocks.
     const checks = ops
       .filter(op => op.fields)
@@ -162,7 +217,8 @@ export function planCommit({ roster, section, prior, canvas, ids, settings, byId
       }))
 
     students.push({
-      userId, userName, status, score, comment, ops, checks,
+      userId, userName, status, score, comment, ops, checks, outside, held, heldOps, after,
+      overwriting: outside.length > 0 && !held,
       returning: status === 'present' && wasAbsent,
       blocked: checks.some(c => c.level === 'block'),
       before: { prof: { score: prof.score, excused: !!prof.excused }, journal: { score: journal.score, excused: !!journal.excused }, lock },
@@ -189,7 +245,9 @@ export function summarize(students) {
     absent: count(s => s.status === 'absent'),
     excused: count(s => s.status === 'excused'),
     returning: count(s => s.returning),
-    unchanged: count(s => s.ops.length === 0),
+    unchanged: count(s => s.ops.length === 0 && !s.held),
+    held: count(s => s.held),
+    overwriting: count(s => s.overwriting),
     blocked: count(s => s.blocked),
     writes: students.reduce((n, s) => n + s.ops.length, 0),
   }
