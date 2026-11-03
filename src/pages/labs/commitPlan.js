@@ -60,7 +60,7 @@ export function buildComment(section, studentId, score, includeFlags, byId = FLA
 // already-absent, and anything else means present. Every stored field is kept —
 // Exceeds, comments, and library comments too — so resuming a draft or
 // reopening a committed period never drops them.
-export function buildSection(roster, prior, profState) {
+export function buildSection(roster, prior, profState, standing = null) {
   const students = {}
   for (const s of roster) {
     const was = prior?.students?.[s.userId]
@@ -68,7 +68,9 @@ export function buildSection(roster, prior, profState) {
     students[s.userId] = was
       ? { kitchen: null, flagIds: [], excused: false, ...was }
       : {
-          kitchen: null,
+          // A student this lab hasn't seen yet starts in their usual kitchen
+          // (storage/kitchens.js), if they have one.
+          kitchen: standing?.students?.[s.userId] ?? null,
           flagIds: [],
           present: !(canvas.excused || canvas.score === 0),
           excused: !!canvas.excused,

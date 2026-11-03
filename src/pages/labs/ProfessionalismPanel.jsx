@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Link2, BookOpen, AlertTriangle } from 'lucide-react'
+import { Plus, Link2, BookOpen, AlertTriangle, Trash2, Loader, X } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Modal from '../../components/Modal.jsx'
@@ -9,11 +9,15 @@ import FieldLabel from '../../components/FieldLabel.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import { useToast } from '../../components/Toast.jsx'
+import { usePinGate } from '../../security/usePinGate.jsx'
 import { getSections } from '../../api/sections.js'
-import { getAssignments, createAssignment } from '../../api/assignments.js'
+import { getAssignments, createAssignment, deleteAssignment } from '../../api/assignments.js'
+import { getAssignmentSubmissions } from '../../api/submissions.js'
+import { NotFoundError } from '../../api/errors.js'
 import { createOverride, updateOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
-import { getCourseSetup, getLabs, saveLab, isStandalone } from '../../storage/setup.js'
+import { getCourseSetup, getLabs, saveLab, deleteLab, isStandalone } from '../../storage/setup.js'
+import { clearAllLabGrading } from '../../storage/labGrading.js'
 import { isProfessionalismAssignment } from './scoring.js'
 
 // JournalSelect sentinel for "no journal — standalone". The primary form
@@ -199,7 +203,7 @@ function SectionDatesAccordion({ sections, dates, onChange }) {
 // has none to show. Each row can also take a new section (with its own due
 // date) after the fact: an assignment first created for just the A-day or B-day
 // sections gets extended to another section here, once that date is known.
-function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup, onAdded }) {
+function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove }) {
   const toast = useToast()
   const mod = modules.find(m => m.id === entry.moduleId)
   const journal = assignments.find(a => a.id === entry.journalAssignmentId)
@@ -263,30 +267,48 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
     }
   }
 
+  const when = fmtLabDates(entry)
   return (
-    <div className="py-2 space-y-1 text-sm">
+    <div className="px-3 py-2 space-y-1 text-sm">
       <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
+        <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-[var(--color-text-body)]">{professionalism?.name ?? entry.name}</span>
-            {mod && <span className="text-[var(--color-text-muted)]">— {mod.name}</span>}
+            <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] whitespace-nowrap">
+              {isStandalone(entry) ? 'Standalone' : 'Pairing'}
+            </span>
             {badge && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] whitespace-nowrap">
                 {badge}
               </span>
             )}
           </div>
-          {!isStandalone(entry) && (
-            <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
-              <BookOpen size={12} /> Journal: {journal ? journal.name : 'not found in Canvas'}
-            </div>
-          )}
+          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-xs text-[var(--color-text-muted)]">
+            {when && <span>{when}</span>}
+            <span>{mod ? mod.name : 'No unit'}</span>
+            {!isStandalone(entry) && (
+              <span className="flex items-center gap-1">
+                <BookOpen size={12} /> {journal ? journal.name : 'Journal not found in Canvas'}
+              </span>
+            )}
+          </div>
         </div>
-        {sections.length > 0 && assignmentId && (
-          <Button variant="ghost" size="sm" icon={Plus} onClick={toggleOpen} aria-expanded={open}>
-            {open ? 'Close' : 'Add a section'}
-          </Button>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {sections.length > 0 && assignmentId && (
+            <Button variant="ghost" size="sm" icon={Plus} onClick={toggleOpen} aria-expanded={open}>
+              {open ? 'Close' : 'Add a section'}
+            </Button>
+          )}
+          <button
+            type="button"
+            onClick={() => onRemove(entry)}
+            title="Delete"
+            aria-label={`Delete ${professionalism?.name ?? entry.name}`}
+            className="p-1.5 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--color-bg-hover)]"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
       </div>
 
       {open && (
@@ -324,31 +346,199 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
   )
 }
 
-function EntryGroup({ title, entries, assignments, modules, courseId, sections, courseSetup, onAdded }) {
-  if (entries.length === 0) return null
+// The entry's lab dates as YYYY-MM-DD strings, sorted. Linked entries have
+// none; their id carries the time they were added (lab_<ms>).
+function labDates(entry) {
+  return [...new Set(Object.values(entry.dates ?? {}).filter(Boolean))].sort()
+}
+function sortDate(entry) {
+  const dates = labDates(entry)
+  if (dates.length) return dates[dates.length - 1]
+  const ms = Number(String(entry.id).replace(/^lab_/, ''))
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : ''
+}
+function fmtDay(d) {
+  return new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+function fmtLabDates(entry) {
+  const dates = labDates(entry)
+  if (dates.length === 0) return null
+  if (dates.length <= 2) return dates.map(fmtDay).join(' & ')
+  return `${fmtDay(dates[0])} – ${fmtDay(dates[dates.length - 1])}`
+}
+
+// The tracked assignments as one list, newest lab first, with a search and a
+// Unit filter so a full year stays usable. Scrolls inside its card.
+function EntryList({ entries, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove }) {
+  const [query, setQuery]   = useState('')
+  const [unitId, setUnitId] = useState('')
+  const q = query.trim().toLowerCase()
+  const nameOf = e => (assignments.find(a => a.id === e.professionalismAssignmentId)?.name ?? e.name)
+  const shown = entries
+    .filter(e => !unitId || (unitId === 'none' ? !e.moduleId : e.moduleId === unitId))
+    .filter(e => !q || nameOf(e).toLowerCase().includes(q))
+    .sort((a, b) => sortDate(b).localeCompare(sortDate(a)) || String(b.id).localeCompare(String(a.id)))
+  const usedModules = modules.filter(m => entries.some(e => e.moduleId === m.id))
+  const anyWithoutUnit = entries.some(e => !e.moduleId)
+
   return (
-    <div>
-      <h3 className="section-label">{title}</h3>
-      <div className="divide-y divide-[var(--color-border-subtle)]">
-        {entries.map(entry => (
-          <EntryRow
-            key={entry.id}
-            entry={entry}
-            assignments={assignments}
-            modules={modules}
-            courseId={courseId}
-            sections={sections}
-            courseSetup={courseSetup}
-            onAdded={onAdded}
-          />
-        ))}
-      </div>
+    <div className="space-y-3">
+      {entries.length > 5 && (
+        <div className="flex flex-wrap gap-2">
+          <TextField value={query} onChange={setQuery} placeholder="Search" aria-label="Search Professionalism assignments" className="flex-1 min-w-[10rem] max-w-sm" />
+          {usedModules.length > 0 && (
+            <Select value={unitId} onChange={setUnitId} aria-label="Filter by unit" className="w-48"
+              options={[
+                { value: '', label: 'All units' },
+                ...usedModules.map(m => ({ value: m.id, label: m.name })),
+                ...(anyWithoutUnit ? [{ value: 'none', label: 'No unit' }] : []),
+              ]} />
+          )}
+        </div>
+      )}
+      {shown.length === 0 ? (
+        <p className="text-sm text-[var(--color-text-muted)]">Nothing matches.</p>
+      ) : (
+        <div className="max-h-[28rem] overflow-y-auto divide-y divide-[var(--color-border-subtle)] rounded-[var(--radius-card)] border border-[var(--color-border)]">
+          {shown.map(entry => (
+            <EntryRow
+              key={entry.id}
+              entry={entry}
+              assignments={assignments}
+              modules={modules}
+              courseId={courseId}
+              sections={sections}
+              courseSetup={courseSetup}
+              onAdded={onAdded}
+              onRemove={onRemove}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-export default function ProfessionalismPanel({ courseId, courseName, loadingCourse, ready, setupVersion, onChanged, onLabCreated, onGoToSetup }) {
+// Delete a tracked assignment: from Canvas too (the assignment and its scores),
+// or from Lab Tools only. Either way the lab's saved grading here goes with it.
+// The journal is never touched. Assignments linked or reused rather than made
+// here default to "Lab Tools only", since someone made them by hand in Canvas.
+function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onRemoved }) {
   const toast = useToast()
+  const { requirePin } = usePinGate()
+  const professionalism = assignments.find(a => a.id === entry.professionalismAssignmentId)
+  const journal = assignments.find(a => a.id === entry.journalAssignmentId)
+  const name = professionalism?.name ?? entry.name
+  const madeHere = entry.origin !== 'linked' && entry.origin !== 'reused'
+  const inCanvas = !!professionalism
+  const [choice, setChoice] = useState(inCanvas && madeHere ? 'delete' : 'unlink')
+  const [graded, setGraded] = useState(null) // students with a score or excused in Canvas; -1 = unknown
+  const [busy, setBusy]     = useState(false)
+
+  useEffect(() => {
+    if (!inCanvas) return
+    let cancelled = false
+    getAssignmentSubmissions(courseId, entry.professionalismAssignmentId)
+      .then(subs => { if (!cancelled) setGraded(subs.filter(s => s.score != null || s.excused).length) })
+      .catch(() => { if (!cancelled) setGraded(-1) })
+    return () => { cancelled = true }
+  }, [inCanvas, courseId, entry.professionalismAssignmentId])
+
+  async function remove(fromCanvas) {
+    setBusy(true)
+    try {
+      if (fromCanvas) {
+        try {
+          await deleteAssignment(courseId, entry.professionalismAssignmentId)
+        } catch (err) {
+          if (!(err instanceof NotFoundError)) throw err // already gone counts as done
+        }
+      }
+      await deleteLab(entry.id)
+      await clearAllLabGrading(entry.id)
+      toast(fromCanvas ? `Deleted "${name}" from Canvas` : `Removed "${name}" from Lab Tools. It's still in Canvas.`, 'success')
+      onRemoved(entry, fromCanvas)
+    } catch (err) {
+      toast(`Could not delete "${name}": ${err.message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirm() {
+    if (choice !== 'delete') { await remove(false); return }
+    try {
+      await requirePin(
+        {
+          action: 'delete_professionalism_assignment',
+          summary: `Delete "${name}" from ${courseName}`,
+          courseId, courseName,
+          warning: graded > 0 ? `${graded} student${graded === 1 ? ' has a score' : 's have scores'} on it.` : undefined,
+        },
+        () => remove(true),
+        { forcePrompt: true },
+      )
+    } catch (err) {
+      toast(err.message, 'error')
+    }
+  }
+
+  return (
+    <Modal
+      title={`Delete "${name}"?`}
+      onClose={() => !busy && onClose()}
+      footer={<>
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant={choice === 'delete' ? 'danger' : 'primary'} onClick={confirm} disabled={busy || (choice === 'delete' && graded === null)}>
+          <span className="flex items-center gap-1.5">
+            {busy && <Loader size={13} className="animate-spin" />}
+            {choice === 'delete' ? 'Delete from Canvas' : 'Remove from Lab Tools'}
+          </span>
+        </Button>
+      </>}
+    >
+      <div className="text-sm text-[var(--color-text-secondary)] space-y-3">
+        {inCanvas && (
+          <label className="flex items-start gap-2">
+            <input type="radio" name="remove-choice" checked={choice === 'delete'} onChange={() => setChoice('delete')} className="mt-1" />
+            <span>
+              <strong className="text-[var(--color-text-body)]">Delete from Canvas too.</strong>{' '}
+              The assignment and every score on it are removed from the gradebook.
+              {!madeHere && <span className="block text-xs text-[var(--color-text-muted)] mt-1">This one was {entry.origin === 'linked' ? 'linked' : 'reused'}, not created by Lab Tools.</span>}
+              {graded === null && <span className="block text-xs text-[var(--color-text-muted)] mt-1">Checking Canvas for scores…</span>}
+              {graded > 0 && (
+                <span className="flex items-start gap-1.5 mt-1 text-[var(--color-warning)]">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  {graded} student{graded === 1 ? ' has a score' : 's have scores'} on it. Those are deleted too.
+                </span>
+              )}
+              {graded === 0 && <span className="block text-xs text-[var(--color-text-muted)] mt-1">No student has a score on it yet.</span>}
+            </span>
+          </label>
+        )}
+        <label className="flex items-start gap-2">
+          <input type="radio" name="remove-choice" checked={choice === 'unlink'} onChange={() => setChoice('unlink')} className="mt-1" />
+          <span>
+            <strong className="text-[var(--color-text-body)]">Remove from Lab Tools only.</strong>{' '}
+            Canvas keeps the assignment and its scores. It leaves this list, the Lab tab, and Unit rollups.
+            {!inCanvas && <span className="block text-xs text-[var(--color-text-muted)] mt-1">It’s already gone from Canvas.</span>}
+          </span>
+        </label>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Either way, the grading Lab Tools saved for this lab is cleared
+          {journal ? <>. The journal &ldquo;{journal.name}&rdquo; is not touched, and its dates stay</> : null}.
+        </p>
+      </div>
+    </Modal>
+  )
+}
+
+export default function ProfessionalismPanel({ courseId, courseName, loadingCourse, ready, setupVersion, onChanged, onLabCreated, onLabRemoved, onGoToSetup }) {
+  const toast = useToast()
+  // Which form is open above the list: 'create', 'link', or null (list only).
+  // With nothing tracked yet the create form shows on its own.
+  const [mode, setMode]               = useState(null)
+  const [removing, setRemoving]       = useState(null) // entry in the delete modal
   const [loading, setLoading]         = useState(false)
   const [sections, setSections]       = useState([])
   const [assignments, setAssignments] = useState([])
@@ -588,12 +778,15 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         journalAssignmentId: standalone ? null : journalId,
         dates: resolvedDates,
         closeDates: {},
+        // Whether this tool made the Canvas assignment; the delete dialog says so.
+        origin: existing ? 'reused' : 'created',
       })
 
       setEntries(prev => [...prev, entry])
       const verb = existing ? `Reused the existing "${assignment.name}"` : `Created "${assignment.name}"`
       toast(standalone ? `${verb} as a standalone` : `${verb} and paired it with its journal`, 'success')
       resetCreateForm()
+      setMode(null)
       onChanged?.()
       // Hand the new lab to the Lab tab so the teacher flows straight into grading.
       onLabCreated?.(entry.id)
@@ -616,8 +809,10 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         journalAssignmentId: null,
         dates: {},
         closeDates: {},
+        origin: 'linked',
       })
       setEntries(prev => [...prev, entry])
+      setMode(null)
       toast(`Linked "${assignment.name}" — opening it for grading`, 'success')
       onChanged?.()
       // Drop straight into grading the linked assignment, same as a created one.
@@ -666,6 +861,15 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const labJournalOptions = journalCandidates.filter(a => a.published && /lab/i.test(a.name))
   const otherJournalOptions = journalCandidates.filter(a => !labJournalOptions.includes(a))
 
+  function handleRemoved(entry, deletedFromCanvas) {
+    setEntries(prev => prev.filter(e => e.id !== entry.id))
+    if (deletedFromCanvas) setAssignments(prev => prev.filter(a => a.id !== entry.professionalismAssignmentId))
+    setRemoving(null)
+    onLabRemoved?.(entry.id)
+    onChanged?.()
+  }
+
+  const formOpen = mode ?? (entries.length === 0 ? 'create' : null)
   const standalone = journalId === STANDALONE
   const scopeInScopeCount = sectionsInScope(sections, courseSetup, scope).length
   const journalDueOffset   = courseSetup?.settings?.journalDueOffsetDays ?? 1
@@ -673,14 +877,23 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
 
   return (
     <div className="space-y-6">
-      {entries.length > 0 && (
-        <Card className="space-y-4">
-          <h2 className="text-base font-semibold text-[var(--color-text-body)]">Professionalism assignments for {courseName}</h2>
-          <EntryGroup title="Pairings" entries={entries.filter(e => !isStandalone(e))} assignments={assignments} modules={modules} courseId={courseId} sections={sections} courseSetup={courseSetup} onAdded={onChanged} />
-          <EntryGroup title="Standalone" entries={entries.filter(isStandalone)} assignments={assignments} modules={modules} courseId={courseId} sections={sections} courseSetup={courseSetup} onAdded={onChanged} />
-        </Card>
-      )}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">
+          Professionalism assignments{entries.length > 0 ? ` (${entries.length})` : ''}
+        </h2>
+        <div className="flex gap-2">
+          <Button size="sm" variant={formOpen === 'create' ? 'secondary' : 'primary'} icon={formOpen === 'create' && entries.length > 0 ? X : Plus}
+            onClick={() => setMode(formOpen === 'create' && entries.length > 0 ? null : 'create')}>
+            {formOpen === 'create' && entries.length > 0 ? 'Close' : 'New'}
+          </Button>
+          <Button size="sm" variant="secondary" icon={formOpen === 'link' ? X : Link2}
+            onClick={() => setMode(formOpen === 'link' ? (entries.length === 0 ? 'create' : null) : 'link')}>
+            {formOpen === 'link' ? 'Close' : 'Link existing'}
+          </Button>
+        </div>
+      </div>
 
+      {formOpen === 'create' && (
       <Card className="space-y-4">
         <div>
           <FieldLabel htmlFor="journal" required>Journal</FieldLabel>
@@ -767,6 +980,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           {creating ? 'Creating…' : standalone ? 'Create Standalone' : 'Create Pairing'}
         </Button>
       </Card>
+      )}
 
       {dupPrompt && (
         <Modal
@@ -802,6 +1016,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         </Modal>
       )}
 
+      {formOpen === 'link' && (
       <Card className="space-y-4">
         <div>
           <h2 className="text-base font-semibold text-[var(--color-text-body)]">Link an existing Professionalism assignment</h2>
@@ -847,6 +1062,19 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           </div>
         )}
       </Card>
+      )}
+
+      {entries.length > 0 && (
+        <Card>
+          <EntryList entries={entries} assignments={assignments} modules={modules} courseId={courseId} sections={sections}
+            courseSetup={courseSetup} onAdded={onChanged} onRemove={setRemoving} />
+        </Card>
+      )}
+
+      {removing && (
+        <RemoveLabModal entry={removing} assignments={assignments} courseId={courseId} courseName={courseName}
+          onClose={() => setRemoving(null)} onRemoved={handleRemoved} />
+      )}
     </div>
   )
 }

@@ -114,3 +114,16 @@ The teacher wanted the two kinds consistent, and asked to keep the kitchen model
   - The Exceeded chip showed the soft top but posts a true 4; it now says 4.
   - Unit/Term: the Unassigned group can't be pushed, which had created a stray "Unassigned … (Unit Score)" assignment. Pushed unit scores now feed the Term rollup without a reload.
 - *Install page:* iPad one-tap is via a Shortcuts "Open URLs" icon or an edited Safari Favorite, because Canvas's manifest stops Add to Home Screen from targeting `/labtools`. The teacher confirmed one-tap works.
+
+---
+
+## Kitchens, deleting, and the Professionalism list (2026-11-02)
+
+**2026-11-02 — Kitchen placements carry over between labs.**
+Kitchens used to live only inside each lab's grading state, so every new lab started with the whole period "Unassigned". Now each period has *standing* kitchens (`storage/kitchens.js`, one synced key per course, `kitchens/<courseId>`, Canvas student ids → kitchen number, no names). A new lab, and any student a lab hasn't placed yet, starts from them. Moving a student in any lab updates them, so the latest arrangement wins. A lab's own state still records who was in which kitchen that day, so reopening an old lab shows its real kitchens. A period with no standing kitchens is seeded once from its most recently touched lab. Kitchens are fixed at 8 (the Kitchens count picker is gone): every room has eight.
+
+**2026-11-02 — Professionalism assignments can be deleted, from Canvas or from Lab Tools only.**
+Each row in the list has a delete button. The dialog offers **Delete from Canvas too** (the assignment and every score on it; PIN always required, `forcePrompt`) or **Remove from Lab Tools only** (Canvas keeps it). It reads Canvas first and says how many students have scores. Both clear the lab's saved grading. The paired journal is never touched, and its section dates stay. Labs now record an `origin` (`created` / `reused` / `linked`); delete-from-Canvas is the default only for ones Lab Tools created (and for older labs saved before `origin` existed), but it's available for all.
+
+**2026-11-02 — The Professionalism tab leads with the list; create and link open on demand.**
+The tracked assignments used to stack above the create form, pushing it further down with every lab. Now the tab is one list, newest lab first, showing type, dates, unit, and journal, with search and a unit filter once there are more than five. The list scrolls inside its card. **New** and **Link existing** open their forms above it. With nothing tracked yet, the create form shows on its own.

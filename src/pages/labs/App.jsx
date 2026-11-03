@@ -84,6 +84,11 @@ export default function App({ initialCourseId }) {
     setSectionId(nextSectionId || '')
   }
 
+  // A deleted lab can't stay the working lab.
+  function handleLabRemoved(removedId) {
+    if (labId === removedId) { setLabId(null); setSectionId('') }
+  }
+
   // Creating a lab drops the teacher straight into grading it.
   function handleLabCreated(newLabId) {
     setLabId(newLabId)
@@ -173,6 +178,7 @@ export default function App({ initialCourseId }) {
                 setupVersion={setupVersion}
                 onChanged={refreshSetup}
                 onLabCreated={handleLabCreated}
+                onLabRemoved={handleLabRemoved}
                 onGoToSetup={() => setShowBootstrap(true)}
               />
             </TabPanel>

@@ -20,7 +20,7 @@ export const COVERAGE = [
   ['grade-clear', 'Clear a score', 'Flip a committed absent student back to Present and recommit (clears their journal zero), or revert a commit'],
   ['override-delete', 'Remove a journal lock', 'Flip a committed absent student back to Present and recommit, or revert a commit'],
   ['comment-delete', 'Delete a comment', 'Revert a commit that posted a comment'],
-  ['assignment-delete', 'Delete assignment', 'Course settings › Clear setup, choosing to delete the pairings'],
+  ['assignment-delete', 'Delete assignment', 'Delete a Professionalism assignment from Canvas (trash icon on its row), or Course settings › Clear setup, choosing to delete the pairings'],
 ]
 
 const ID = '(\\d+|debug-\\d+)'

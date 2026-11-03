@@ -21,10 +21,12 @@ import {
   deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
+import { seedStandingKitchens, saveStandingKitchen } from '../../storage/kitchens.js'
 import { planCommit, buildSection } from './commitPlan.js'
 import { runCommit, runRevert } from './commitRun.js'
 
-const DEFAULT_KITCHENS = 8
+// Every lab room has eight kitchens.
+const KITCHEN_COUNT = 8
 
 
 // Stable empty list for the comment bank before it loads, so memoized rows
@@ -54,7 +56,7 @@ export default function KitchenScorePanel({
   const [stored, setStored]           = useState(null) // this period's stored grading state (for Revert)
   const [statuses, setStatuses]       = useState({})   // sectionId -> 'done' | 'draft' (period checkmarks)
   const [section, setSection]         = useState(emptySection())
-  const [kitchenCount, setKitchenCount] = useState(DEFAULT_KITCHENS)
+  const [standing, setStanding]       = useState(null) // this period's usual kitchens (storage/kitchens.js)
 
   const [pendingDraft, setPendingDraft] = useState(null) // the stored state when an unsaved draft exists
   const [confirming, setConfirming]   = useState(false)
@@ -94,7 +96,7 @@ export default function KitchenScorePanel({
     clearTimeout(autosaveTimer.current)
     setPendingDraft(null)
     setLoadError(null)
-    if (!entry || !sectionId) { setRoster([]); setProfScores({}); setProfState({}); setStored(null); setSection(emptySection()); return }
+    if (!entry || !sectionId) { setRoster([]); setProfScores({}); setProfState({}); setStored(null); setStanding(null); setSection(emptySection()); return }
     // A slower response for a period the teacher already left must not land on
     // the screen (it would show — and then autosave — the wrong period).
     let cancelled = false
@@ -103,8 +105,9 @@ export default function KitchenScorePanel({
       getEnrollments(courseId),
       getAssignmentSubmissions(courseId, entry.professionalismAssignmentId, { includeComments: true }),
       getLabGrading(labId, sectionId),
+      seedStandingKitchens(courseId, sectionId, entries.map(e => e.id)),
     ])
-      .then(([enrollments, profSubs, storedState]) => {
+      .then(([enrollments, profSubs, storedState, standingKitchens]) => {
         if (cancelled) return
         const sec = sections.find(s => s.id === sectionId)
         const idsInSection = new Set(sec?.studentIds ?? [])
@@ -117,14 +120,16 @@ export default function KitchenScorePanel({
         setProfScores(Object.fromEntries(profSubs.map(s => [s.userId, s.score])))
         setProfState(state)
         setStored(storedState)
+        setStanding(standingKitchens)
         // Baseline from the committed set; a draft, if any, is offered via prompt.
-        setSection(buildSection(r, storedState.committed, state))
-        setKitchenCount(maxKitchen(storedState.committed, storedState.draft))
+        // Students the lab hasn't placed yet start in their usual kitchen.
+        setSection(buildSection(r, storedState.committed, state, standingKitchens))
         if (isUnsavedDraft(storedState)) setPendingDraft(storedState)
       })
       .catch(err => { if (!cancelled) { setRoster([]); setLoadError(err.message) } })
       .finally(() => { if (!cancelled) setRosterLoading(false) })
     return () => { cancelled = true }
+  // entries (read only for the one-time seed) loads alongside sections, so it's covered.
   }, [entry, sectionId, courseId, sections, labId, reloadTick])
 
   // --- period checkmarks: which periods of this lab are committed / have drafts ---
@@ -155,10 +160,16 @@ export default function KitchenScorePanel({
     setStatuses(prev => (prev[sectionId] === 'draft' ? prev : { ...prev, [sectionId]: 'draft' }))
   }, [labId, sectionId])
 
+  // Moving a student also moves their usual kitchen, so the next lab for this
+  // period starts with the latest arrangement.
+  const assignKitchen = useCallback((studentId, kitchen) => {
+    applySection(s => setStudentKitchen(s, studentId, kitchen))
+    saveStandingKitchen(courseId, sectionId, studentId, kitchen)
+  }, [applySection, courseId, sectionId])
+
   function resumeDraft() {
-    const draft = buildSection(roster, pendingDraft.draft, profState)
+    const draft = buildSection(roster, pendingDraft.draft, profState, standing)
     setSection(draft)
-    setKitchenCount(maxKitchen(pendingDraft.draft, pendingDraft.committed))
     setPendingDraft(null)
   }
 
@@ -263,7 +274,7 @@ export default function KitchenScorePanel({
       const nextStored = await revertLabGrading(labId, sectionId)
       setStored(nextStored)
       // The reverted work is now a draft — offer it like any saved work.
-      setSection(buildSection(roster, nextStored.committed, profState))
+      setSection(buildSection(roster, nextStored.committed, profState, standing))
       if (nextStored.draft) setPendingDraft(nextStored)
       await refreshScores()
       setReverting(false)
@@ -341,14 +352,14 @@ export default function KitchenScorePanel({
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null
   })
-  const kitchenNumbers = Array.from({ length: kitchenCount }, (_, i) => i + 1)
+  const kitchenNumbers = Array.from({ length: KITCHEN_COUNT }, (_, i) => i + 1)
   const unassigned = roster.filter(s => section.students[s.userId]?.kitchen == null)
 
   return (
     <div className="space-y-6">
       {/* Working context: pick the lab + period ONCE; both persist across tabs. */}
       <Card className="space-y-3">
-        <div className="grid sm:grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-2 gap-3">
           <div className="sm:col-span-1">
             <FieldLabel htmlFor="lab">Lab</FieldLabel>
             <Select id="lab" value={labId ?? ''} onChange={id => onSelect(id, '')}>
@@ -372,11 +383,6 @@ export default function KitchenScorePanel({
                 { value: '', label: overridesLoading ? 'Loading…' : 'Select a period' },
                 ...gradeableSections.map(s => ({ value: s.id, label: periodLabel(s.name, statuses[s.id]) })),
               ]} />
-          </div>
-          <div className="sm:col-span-1">
-            <FieldLabel htmlFor="kcount">Kitchens</FieldLabel>
-            <Select id="kcount" value={String(kitchenCount)} onChange={v => setKitchenCount(Number(v))}
-              options={Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} />
           </div>
         </div>
       </Card>
@@ -455,8 +461,8 @@ export default function KitchenScorePanel({
                     )}
                     {members.map(s => (
                       <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
-                        flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} />
+                        kitchenCount={KITCHEN_COUNT} commentLibrary={commentLibrary} maxScore={maxScore}
+                        flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                     ))}
                   </div>
                 </div>
@@ -473,8 +479,8 @@ export default function KitchenScorePanel({
               <div className="px-4 py-2 divide-y divide-[var(--color-border-subtle)]">
                 {unassigned.map(s => (
                   <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
-                    kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
-                    flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} />
+                    kitchenCount={KITCHEN_COUNT} commentLibrary={commentLibrary} maxScore={maxScore}
+                    flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                 ))}
               </div>
             </Card>
@@ -483,6 +489,7 @@ export default function KitchenScorePanel({
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p className="text-xs text-[var(--color-text-muted)]">
               Edits autosave on this device. Nothing posts to Canvas until you commit.
+              Kitchen placements carry over to this period’s next lab.
             </p>
             <div className="flex flex-wrap gap-2">
               {stored?.lastCommit && (
@@ -546,7 +553,7 @@ export default function KitchenScorePanel({
 // expands the controls, so a long roster stays clean until a student needs edits.
 // The controls live in a display:contents wrapper so they lay out inline in the
 // row on md+ (md:contents) and only hide on a collapsed phone — no duplicate markup.
-function StudentRowBase({ student, section, score, kitchenCount, commentLibrary = [], maxScore = 4, flagsById = FLAG_BY_ID, individualFlags = [], onApply }) {
+function StudentRowBase({ student, section, score, kitchenCount, commentLibrary = [], maxScore = 4, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
   const [open, setOpen] = useState(false)
@@ -611,7 +618,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
           )}
           <Select
             value={st.kitchen == null ? '' : String(st.kitchen)}
-            onChange={v => onApply(s => setStudentKitchen(s, student.userId, v === '' ? null : Number(v)))}
+            onChange={v => onAssignKitchen(student.userId, v === '' ? null : Number(v))}
             className={`${st.kitchen == null ? 'w-36' : 'w-24'} shrink-0`}
             options={[
               { value: '', label: 'No kitchen' },
@@ -712,6 +719,7 @@ function studentRowEqual(prev, next) {
     && prev.flagsById === next.flagsById
     && prev.individualFlags === next.individualFlags
     && prev.onApply === next.onApply
+    && prev.onAssignKitchen === next.onAssignKitchen
     && prev.section.students[prev.student.userId] === next.section.students[next.student.userId]
 }
 const StudentRow = memo(StudentRowBase, studentRowEqual)
@@ -748,22 +756,6 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
       )}
     </>
   )
-}
-
-// Highest kitchen number referenced by either stored slot, floored at the default
-// so a fresh lab shows the full set of kitchen cards.
-function maxKitchen(...sectionsMaybe) {
-  let max = DEFAULT_KITCHENS
-  for (const sec of sectionsMaybe) {
-    for (const st of Object.values(sec?.students ?? {})) {
-      if (typeof st.kitchen === 'number' && st.kitchen > max) max = st.kitchen
-    }
-    for (const k of Object.keys(sec?.kitchens ?? {})) {
-      const n = Number(k)
-      if (Number.isFinite(n) && n > max) max = n
-    }
-  }
-  return max
 }
 
 function fmtWhen(iso) {

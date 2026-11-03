@@ -137,6 +137,13 @@ export async function clearLabGrading(labId, sectionId) {
   await kvSet(labKey(labId), rest)
 }
 
+// Forget every period of a lab (the lab itself was deleted). Written as an
+// empty document rather than removed: kvRemove is local-only, so sync would
+// bring the old copy back down from Canvas.
+export async function clearAllLabGrading(labId) {
+  if (await kvGet(labKey(labId))) await kvSet(labKey(labId), {})
+}
+
 export async function hasUnsavedDraft(labId, sectionId) {
   return isUnsavedDraft(await getLabGrading(labId, sectionId))
 }
