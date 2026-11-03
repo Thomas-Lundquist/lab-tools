@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  emptyState, isUnsavedDraft, activeSection, deriveStudentScore, deriveSectionScores,
+  emptyState, isUnsavedDraft, periodStatus, sameSection, activeSection, deriveStudentScore, deriveSectionScores,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentExceeded,
 } from './labGrading.js'
 
@@ -183,4 +183,22 @@ test('an individual Major drops two tiers, a Minor one; never below 1', () => {
 test('built-in individual flags are all Minor, so existing labs keep their scores', async () => {
   const { INDIVIDUAL_FLAGS } = await import('../config/labFlags.js')
   assert.ok(INDIVIDUAL_FLAGS.every(f => f.severity === 'minor'))
+})
+
+// --- a draft identical to the commit isn't unsaved work ---
+
+test('a draft that matches the commit (ignoring defaults) is not unsaved', () => {
+  const committed = { kitchens: { 1: { flagIds: ['a'], exceeded: false } }, students: { s1: { kitchen: 1, flagIds: [], present: true } } }
+  const draft = { kitchens: { 1: { flagIds: ['a'], exceeded: false }, 2: { flagIds: [], exceeded: false } },
+    students: { s1: { kitchen: 1, flagIds: [], present: true, excused: false, comment: '' } } }
+  assert.equal(sameSection(draft, committed), true)
+  assert.equal(isUnsavedDraft({ committed, draft }), false)
+  assert.equal(periodStatus({ committed, draft }), 'done')
+})
+
+test('a real edit is still unsaved', () => {
+  const committed = { kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: true } } }
+  const draft = { kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: false } } }
+  assert.equal(periodStatus({ committed, draft }), 'draft')
+  assert.equal(periodStatus({ committed: null, draft }), 'draft', 'never committed')
 })

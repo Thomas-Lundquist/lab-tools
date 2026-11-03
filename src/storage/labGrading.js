@@ -93,7 +93,9 @@ export async function saveDraft(labId, sectionId, section) {
 // is kept as lastCommit for Revert, with the previous committed set to go back to.
 // `posted` holds the students whose Canvas state this commit confirmed; others
 // (failed, or held because Canvas changed) keep what was posted before.
-export async function commitLabGrading(labId, sectionId, section, { record = null, keepDraft = false, posted = {} } = {}) {
+// `keepLastCommit`: nothing was sent (Canvas already matched), so the previous
+// commit stays the one Revert undoes.
+export async function commitLabGrading(labId, sectionId, section, { record = null, keepDraft = false, posted = {}, keepLastCommit = false } = {}) {
   const prev = await getLabGrading(labId, sectionId)
   const now = new Date().toISOString()
   return putState(labId, sectionId, {
@@ -102,9 +104,10 @@ export async function commitLabGrading(labId, sectionId, section, { record = nul
     draft: keepDraft ? section : null,
     updatedAt: now,
     posted: { ...(prev.posted ?? {}), ...posted },
-    lastCommit: record
-      ? { at: now, record, prevCommitted: prev.committed ?? null, prevCommittedAt: prev.committedAt ?? null, prevPosted: prev.posted ?? {} }
-      : null,
+    lastCommit: keepLastCommit ? (prev.lastCommit ?? null)
+      : record
+        ? { at: now, record, prevCommitted: prev.committed ?? null, prevCommittedAt: prev.committedAt ?? null, prevPosted: prev.posted ?? {} }
+        : null,
   })
 }
 
@@ -138,8 +141,10 @@ export async function getPeriodStatuses(labId) {
   return Object.fromEntries(Object.entries(lab).map(([sectionId, st]) => [sectionId, periodStatus(st)]))
 }
 
+// A draft identical to the commit (an edit made and undone, a switch tapped
+// back) isn't unsaved work, so it reads as committed.
 export function periodStatus(state) {
-  if (state?.draft) return 'draft'
+  if (isUnsavedDraft(state)) return 'draft'
   if (state?.committed) return 'done'
   return null
 }
@@ -171,9 +176,31 @@ export async function hasUnsavedDraft(labId, sectionId) {
 
 // ---- pure logic (no storage; unit-tested) ----
 
-// An unsaved draft exists whenever a draft slot is populated.
+// An unsaved draft is a draft that differs from what was last committed.
 export function isUnsavedDraft(state) {
-  return !!state?.draft
+  return !!state?.draft && !sameSection(state.draft, state.committed)
+}
+
+// Whether two sections hold the same grading, ignoring defaults: a student
+// stored as { present: true } and one stored as { present: true, flagIds: [],
+// excused: false, comment: '' } are the same, and so is an empty kitchen.
+export function sameSection(a, b) {
+  if (!a || !b) return false
+  const student = st => {
+    const s = st ?? {}
+    return JSON.stringify([s.kitchen ?? null, [...(s.flagIds ?? [])].sort(), s.present !== false, !!s.excused,
+      !!s.exceeded, (s.comment ?? '').trim(), s.libraryComments ?? []])
+  }
+  const kitchen = k => JSON.stringify([[...(k?.flagIds ?? [])].sort(), !!k?.exceeded])
+  const blankKitchen = kitchen(null)
+  const ids = new Set([...Object.keys(a.students ?? {}), ...Object.keys(b.students ?? {})])
+  for (const id of ids) if (student(a.students?.[id]) !== student(b.students?.[id])) return false
+  const ks = new Set([...Object.keys(a.kitchens ?? {}), ...Object.keys(b.kitchens ?? {})])
+  for (const k of ks) {
+    const ka = kitchen(a.kitchens?.[k]); const kb = kitchen(b.kitchens?.[k])
+    if (ka !== kb && !(ka === blankKitchen && kb === blankKitchen)) return false
+  }
+  return true
 }
 
 // The section the screen should show by default: the draft if one exists, else

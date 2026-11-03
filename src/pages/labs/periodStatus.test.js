@@ -13,7 +13,7 @@ test('lists periods whose lab day has come but are not committed', () => {
 
 test('a commit with edits since still counts as not committed', () => {
   const entries = [{ id: 'L', name: 'X', dates: { s1: '2026-11-01' } }]
-  const states = { L: { s1: { committed: { students: {} }, draft: { students: {} } } } }
+  const states = { L: { s1: { committed: { students: { a: { present: true } } }, draft: { students: { a: { present: false } } } } } }
   assert.equal(uncommittedPeriods(entries, states, sections, '2026-11-02').length, 1)
 })
 

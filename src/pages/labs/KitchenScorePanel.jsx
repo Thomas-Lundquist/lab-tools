@@ -18,7 +18,7 @@ import { getOverrides } from '../../api/overrides.js'
 import { getCourseSetup, getLabs, isStandalone, getFlags, getCommentBank } from '../../storage/setup.js'
 import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
-  getLabGrading, getAllLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, periodStatus,
+  getLabGrading, getAllLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, periodStatus, sameSection,
   deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
@@ -151,6 +151,8 @@ export default function KitchenScorePanel({
         // Students the lab hasn't placed yet start in their usual kitchen.
         setSection(buildSection(r, storedState.committed, state, standingKitchens))
         if (isUnsavedDraft(storedState)) setPendingDraft(storedState)
+        // A leftover draft that matches the commit is noise: clear it.
+        else if (storedState.draft) discardDraft(labId, sectionId).then(st => { if (!cancelled) setStored(st) })
       })
       .catch(err => { if (!cancelled) { setRoster([]); setLoadError(err.message) } })
       .finally(() => { if (!cancelled) setRosterLoading(false) })
@@ -194,14 +196,26 @@ export default function KitchenScorePanel({
   // memoized row only re-renders when its own student changes, so the `section`
   // it last saw is stale; building the new section from that snapshot silently
   // erased every other student's edits since (kitchen assignments vanishing).
+  //
+  // An edit that puts the period back the way it was committed (a switch tapped
+  // back) drops the draft instead of saving one, so it doesn't read as unsaved.
+  const committedRef = useRef(null)
+  committedRef.current = stored?.committed ?? null
   const applySection = useCallback((update) => {
     setSection(prev => {
       const next = update(prev)
+      const clean = sameSection(next, committedRef.current)
       clearTimeout(autosaveTimer.current)
-      autosaveTimer.current = setTimeout(() => { saveDraft(labId, sectionId, next) }, 600)
+      autosaveTimer.current = setTimeout(() => {
+        if (clean) discardDraft(labId, sectionId)
+        else saveDraft(labId, sectionId, next)
+      }, 600)
+      setStatuses(st => {
+        const want = clean ? 'done' : 'draft'
+        return st[sectionId] === want ? st : { ...st, [sectionId]: want }
+      })
       return next
     })
-    setStatuses(prev => (prev[sectionId] === 'draft' ? prev : { ...prev, [sectionId]: 'draft' }))
   }, [labId, sectionId])
 
   // Moving a student also moves their usual kitchen, so the next lab for this
@@ -297,7 +311,10 @@ export default function KitchenScorePanel({
     try {
       // Re-read Canvas right before writing: the plan acts on the latest state.
       const plan = buildPlan(await loadCanvasSnapshot())
-      const { failures, record } = await runCommit(plan, {
+      // Canvas already matches: nothing to send, but the period is recorded as
+      // committed (and the previous commit stays the one Revert undoes).
+      const nothingToSend = plan.summary.writes === 0
+      const { failures, record } = nothingToSend ? { failures: [], record: null } : await runCommit(plan, {
         courseId, entry,
         onProgress: (done, total) => setProgress(`${done} of ${total} students saved…`),
       })
@@ -309,7 +326,7 @@ export default function KitchenScorePanel({
       const posted = Object.fromEntries(plan.students
         .filter(s => s.after && !failed.has(s.userId))
         .map(s => [s.userId, { prof: s.after }]))
-      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0, posted })
+      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0, posted, keepLastCommit: nothingToSend })
       setStored(nextStored)
       setPendingDraft(null)
       await refreshScores()
@@ -319,7 +336,9 @@ export default function KitchenScorePanel({
         toast(`${failures.length} of ${plan.students.length} didn't save (${names}${failures.length > 3 ? '…' : ''}). Your work is kept — commit again to retry. Details: Settings › Testing › Diagnostics`, 'warning')
       } else {
         const held = plan.summary.held
-        toast(`Committed ${entry.name}${held ? `. ${held} student${held === 1 ? '' : 's'} changed in Canvas left as is` : ''}`, 'success')
+        toast(nothingToSend
+          ? `Marked ${entry.name} as committed for this period. Nothing needed sending.`
+          : `Committed ${entry.name}${held ? `. ${held} student${held === 1 ? '' : 's'} changed in Canvas left as is` : ''}`, 'success')
       }
       onChanged?.()
     } catch (err) {
@@ -673,9 +692,11 @@ export default function KitchenScorePanel({
           onClose={() => !saving && setConfirming(false)}
           footer={<>
             <Button variant="secondary" onClick={() => setConfirming(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleCommit} disabled={saving || !preview?.plan || preview.plan.summary.writes === 0}>
+            <Button onClick={handleCommit} disabled={saving || !preview?.plan}>
               <span className="flex items-center gap-1.5">{saving && <Loader size={13} className="animate-spin" />}
-                {preview?.plan ? `Commit ${preview.plan.summary.writes} change${preview.plan.summary.writes === 1 ? '' : 's'}` : 'Commit'}
+                {!preview?.plan ? 'Commit'
+                  : preview.plan.summary.writes === 0 ? 'Mark as committed'
+                    : `Commit ${preview.plan.summary.writes} change${preview.plan.summary.writes === 1 ? '' : 's'}`}
               </span>
             </Button>
           </>}
@@ -1024,7 +1045,9 @@ function CommitPreview({ preview, presentUnassigned, entry, onToggleOverwrite })
     <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
       {summary.writes === 0 ? (
         <p className="text-[var(--color-text-body)]">
-          {summary.held ? 'Nothing to send unless you choose Overwrite below.' : 'Canvas already matches this period — nothing to send.'}
+          {summary.held
+            ? 'Nothing to send unless you choose Overwrite below. Mark as committed records the period as done and leaves those students as they are in Canvas.'
+            : 'Canvas already matches this period, so nothing will be sent. Mark as committed records the period as done.'}
         </p>
       ) : (
         <ul className="space-y-0.5 text-[var(--color-text-body)]">
@@ -1070,7 +1093,7 @@ function CommitPreview({ preview, presentUnassigned, entry, onToggleOverwrite })
           </ul>
         </details>
       )}
-      <p>This changes real grades in Canvas. You can revert this commit afterwards.</p>
+      {summary.writes > 0 && <p>This changes real grades in Canvas. You can revert this commit afterwards.</p>}
     </div>
   )
 }
