@@ -18,11 +18,12 @@ import { getOverrides } from '../../api/overrides.js'
 import { getCourseSetup, getLabs, isStandalone, getFlags, getCommentBank } from '../../storage/setup.js'
 import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
-  getLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, getPeriodStatuses,
+  getLabGrading, getAllLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, periodStatus,
   deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
-import { seedStandingKitchens, saveStandingKitchen, isLatestLab, newestFirst, todaysLab, labDateFor } from '../../storage/kitchens.js'
+import { seedStandingKitchens, saveStandingKitchen, isLatestLab, newestFirst, todaysLab, labDateFor, localToday } from '../../storage/kitchens.js'
+import { uncommittedPeriods } from './periodStatus.js'
 import { planCommit, buildSection } from './commitPlan.js'
 import { runCommit, runRevert, planRevert } from './commitRun.js'
 
@@ -57,6 +58,9 @@ export default function KitchenScorePanel({
   const [loadError, setLoadError]     = useState(null)
   const [stored, setStored]           = useState(null) // this period's stored grading state (for Revert)
   const [statuses, setStatuses]       = useState({})   // sectionId -> 'done' | 'draft' (period checkmarks)
+  const [committedAt, setCommittedAt] = useState({})   // sectionId -> when this lab was last committed there
+  const [due, setDue]                 = useState([])   // periods from recent lab days not committed yet
+  const [dismissed, setDismissed]     = useState(() => new Set()) // "labId:sectionId" hidden until next launch
   const [section, setSection]         = useState(emptySection())
   const [standing, setStanding]       = useState(null) // this period's usual kitchens (storage/kitchens.js)
 
@@ -154,13 +158,31 @@ export default function KitchenScorePanel({
   // entries (read only for the one-time seed) loads alongside sections, so it's covered.
   }, [entry, sectionId, courseId, sections, labId, reloadTick])
 
-  // --- period checkmarks: which periods of this lab are committed / have drafts ---
+  // --- period status: which periods of this lab are committed / have drafts ---
   useEffect(() => {
-    if (!labId) { setStatuses({}); return }
+    if (!labId) { setStatuses({}); setCommittedAt({}); return }
     let cancelled = false
-    getPeriodStatuses(labId).then(st => { if (!cancelled) setStatuses(st) })
+    getAllLabGrading(labId).then(lab => {
+      if (cancelled) return
+      setStatuses(Object.fromEntries(Object.entries(lab).map(([sid, st]) => [sid, periodStatus(st)])))
+      setCommittedAt(Object.fromEntries(Object.entries(lab).map(([sid, st]) => [sid, st?.committedAt ?? null])))
+    })
     return () => { cancelled = true }
   }, [labId, stored])
+
+  // --- periods from the last week's lab days that still aren't committed ---
+  // Re-checked after every commit, revert, or first edit of a period.
+  const draftKey = statuses[sectionId]
+  useEffect(() => {
+    if (!entries.length) { setDue([]); return }
+    let cancelled = false
+    const today = localToday()
+    const recent = entries.filter(e => Object.values(e.dates ?? {}).some(d => d && d <= today))
+    Promise.all(recent.map(e => getAllLabGrading(e.id).then(st => [e.id, st])))
+      .then(pairs => { if (!cancelled) setDue(uncommittedPeriods(recent, Object.fromEntries(pairs), sections, today)) })
+      .catch(() => { if (!cancelled) setDue([]) })
+    return () => { cancelled = true }
+  }, [entries, sections, stored, draftKey])
 
   // Every edit goes through here: update state AND debounce-save a draft. Load and
   // Resume call setSection directly, so a draft is only ever written by a real edit.
@@ -421,6 +443,8 @@ export default function KitchenScorePanel({
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null
   })
+  // The open period is already in front of the teacher; the warning lists the rest.
+  const visibleDue = due.filter(d => !dismissed.has(`${d.labId}:${d.sectionId}`) && !(d.labId === labId && d.sectionId === sectionId))
   const counts = {
     present: roster.filter(s => section.students[s.userId]?.present !== false).length,
     absent: roster.filter(s => section.students[s.userId]?.present === false).length,
@@ -434,8 +458,8 @@ export default function KitchenScorePanel({
     <div className="space-y-6">
       {/* Working context: pick the lab + period ONCE; both persist across tabs. */}
       <Card className="space-y-3">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-1">
+        <div className="max-w-xl">
+          <div>
             <FieldLabel htmlFor="lab">Lab</FieldLabel>
             <Select id="lab" value={labId ?? ''} onChange={id => onSelect(id, '')}>
               <option value="">Select a lab</option>
@@ -444,16 +468,76 @@ export default function KitchenScorePanel({
               ))}
             </Select>
           </div>
-          <div className="sm:col-span-1">
-            <FieldLabel htmlFor="period">Period</FieldLabel>
-            <Select id="period" value={sectionId ?? ''} onChange={sid => onSelect(labId, sid)} disabled={!labId || overridesLoading}
-              options={[
-                { value: '', label: overridesLoading ? 'Loading…' : 'Select a period' },
-                ...gradeableSections.map(s => ({ value: s.id, label: periodLabel(s.name, statuses[s.id]) })),
-              ]} />
-          </div>
         </div>
+
+        {/* Periods as buttons, each showing whether it's committed. */}
+        {labId && (
+          <div>
+            <p className="label mb-1.5">Period</p>
+            {overridesLoading ? (
+              <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>
+            ) : (
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Period">
+                {gradeableSections.map(s => {
+                  const st = statuses[s.id]
+                  const date = entry?.dates?.[s.id]
+                  const overdue = st !== 'done' && date && date <= localToday()
+                  const on = s.id === sectionId
+                  return (
+                    <button key={s.id} type="button" role="radio" aria-checked={on} onClick={() => onSelect(labId, s.id)}
+                      className={`text-left px-3 py-1.5 rounded-[var(--radius-control)] border-2 min-w-[7.5rem] ${on
+                        ? 'border-[var(--color-text-body)] bg-[var(--color-bg-hover)]'
+                        : 'border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]'}`}>
+                      <span className="block text-sm font-medium text-[var(--color-text-body)]">{s.name}</span>
+                      <span className={`block text-xs ${st === 'done' ? 'text-[var(--color-success)]' : overdue ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-muted)]'}`}>
+                        {st === 'done' ? `✓ Committed ${fmtWhen(committedAt[s.id])}`
+                          : st === 'draft' ? '• Unsaved edits'
+                            : date ? `Not started · ${fmtDay(date)}` : 'Not started'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </Card>
+
+      {/* Recent lab days with periods not committed yet. */}
+      {visibleDue.length > 0 && (
+        <Card className="border-2 border-[var(--color-warning)] space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <p className="flex items-start gap-2 text-sm font-medium text-[var(--color-text-body)]">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+              Not committed yet: {visibleDue.length} period{visibleDue.length === 1 ? '' : 's'} from recent lab days
+            </p>
+            <button type="button" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] underline shrink-0"
+              onClick={() => setDismissed(prev => new Set([...prev, ...visibleDue.map(d => `${d.labId}:${d.sectionId}`)]))}>
+              Hide until next launch
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {visibleDue.map(d => (
+              <button key={`${d.labId}:${d.sectionId}`} type="button" onClick={() => onSelect(d.labId, d.sectionId)}
+                className="text-left px-2.5 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]">
+                <span className="block text-sm text-[var(--color-text-body)]">{d.sectionName}</span>
+                <span className="block text-xs text-[var(--color-text-muted)]">
+                  {d.labName.replace(/\s*professionalism\s*$/i, '')} · {fmtDay(d.date)}{d.status === 'draft' ? ' · unsaved edits' : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* What the open period's state means. */}
+      {entry && sectionId && !rosterLoading && !pendingDraft && (statuses[sectionId] === 'done' || statuses[sectionId] === 'draft') && (
+        <p className={`text-sm ${statuses[sectionId] === 'done' ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}`}>
+          {statuses[sectionId] === 'done'
+            ? `✓ Committed ${fmtWhen(committedAt[sectionId])}. This is what Lab Tools sent to Canvas; change anything and commit again to update it.`
+            : '• Unsaved edits on this device. Not in Canvas yet: commit to send them.'}
+        </p>
+      )}
 
       {/* Resume/discard prompt: local work exists that is newer than Canvas. */}
       {pendingDraft && (
@@ -866,6 +950,10 @@ function highestKitchen(section) {
   return max
 }
 
+function fmtDay(ymd) {
+  return new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 function fmtWhen(iso) {
   if (!iso) return 'earlier'
   try {
@@ -881,14 +969,6 @@ function profStateFrom(subs) {
 }
 
 const revertCount = stored => Object.keys(stored?.lastCommit?.record?.students ?? {}).length
-
-// Period picker label: a check when the period is committed with nothing
-// unsaved since, a dot when it has unsaved edits.
-function periodLabel(name, status) {
-  if (status === 'done') return `✓ ${name}`
-  if (status === 'draft') return `• ${name} (unsaved edits)`
-  return name
-}
 
 // The commit preview: exactly what will be sent, from the commit plan.
 function CommitPreview({ preview, presentUnassigned, entry, onToggleOverwrite }) {
