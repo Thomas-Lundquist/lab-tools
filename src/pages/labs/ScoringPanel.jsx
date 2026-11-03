@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Loader, Send, Copy, Check, Undo2, ChevronDown, ChevronRight, X, Pencil } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { Loader, Send, Copy, Check, Undo2, ChevronDown, ChevronRight, X, Pencil, RefreshCw } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Callout from '../../components/Callout.jsx'
@@ -47,7 +47,9 @@ async function mapLimit(items, limit, fn) {
 
 const toMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
 
-export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
+// active / dataVersion: the panel stays mounted while hidden (labs/App.jsx), so
+// it reloads when it's shown again after a commit or a lab change elsewhere.
+export default function ScoringPanel({ courseId, courseName, loadingCourse, active = true, dataVersion = 0 }) {
   const [assignments, setAssignments]   = useState([])
   const [students, setStudents]         = useState([])
   const [sections, setSections]         = useState([])
@@ -60,6 +62,12 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
   const [loading, setLoading]           = useState(false)
   const [loadError, setLoadError]       = useState(null)
   const [reloadTick, setReloadTick]     = useState(0)
+  const loadedVersion = useRef(dataVersion)
+
+  // Shown again after something changed while hidden: reload.
+  useEffect(() => {
+    if (active && loadedVersion.current !== dataVersion) setReloadTick(t => t + 1)
+  }, [active, dataVersion])
 
   useEffect(() => {
     if (!courseId) {
@@ -70,6 +78,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
     let cancelled = false
     setLoading(true)
     setLoadError(null)
+    loadedVersion.current = dataVersion
     ;(async () => {
       try {
         const [asns, secs, enrollments, mods, entryList, termList, setup, roll] = await Promise.all([
@@ -135,6 +144,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
     .map(a => ({ id: a.id, name: a.name, pointsPossible: a.pointsPossible, entry: entryByAssignment[a.id] ?? null, moduleId: entryByAssignment[a.id]?.moduleId ?? null })),
   [assignments, entryByAssignment])
   const unassignedLabs = labs.filter(l => !l.moduleId || !modules.some(m => m.id === l.moduleId))
+  const untrackedCount = unassignedLabs.filter(l => !l.entry).length
 
   const findAssignment = useCallback(title => assignments.find(a => norm(a.name) === norm(title)) ?? null, [assignments])
 
@@ -174,7 +184,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
     return (
       <EmptyState
         title="No professionalism assignments found"
-        body='No assignment in this course has "professionalism" in its name. Create one in the Professionalism tab first.'
+        body='No published assignment in this course has "professionalism" in its name. Create one in the Assignments tab first.'
       />
     )
   }
@@ -187,23 +197,26 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text-body)]">Scoring</h1>
-        <p className="text-sm text-[var(--color-text-muted)] mt-1">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-[var(--color-text-muted)]">
           A Unit score is the average of its labs; a Term score is the average of every lab in its Units, so each lab counts the same.
           Nothing is dropped. Excused labs don&rsquo;t count, and blank ones are noted.
         </p>
+        <Button variant="ghost" size="sm" icon={RefreshCw} onClick={() => setReloadTick(t => t + 1)}>Refresh</Button>
       </div>
 
       {unassignedLabs.length > 0 && (
         <Callout tone="warning">
-          {unassignedLabs.length} lab{unassignedLabs.length === 1 ? ' has' : 's have'} no Module, so {unassignedLabs.length === 1 ? 'it isn’t' : 'they aren’t'} in any Unit or Term:{' '}
-          {unassignedLabs.slice(0, 4).map(l => l.name).join(', ')}{unassignedLabs.length > 4 ? '…' : ''}. Choose a Module for {unassignedLabs.length === 1 ? 'it' : 'them'} in the Professionalism tab.
+          {unassignedLabs.length} professionalism assignment{unassignedLabs.length === 1 ? ' isn’t' : 's aren’t'} in any Unit or Term:{' '}
+          {unassignedLabs.slice(0, 4).map(l => l.name).join(', ')}{unassignedLabs.length > 4 ? '…' : ''}.{' '}
+          {untrackedCount > 0
+            ? <>To count {unassignedLabs.length === 1 ? 'it' : 'them'}, link {untrackedCount === 1 ? 'it' : 'them'} in the Assignments tab (Link existing) and choose a Module.</>
+            : <>Choose a Module for {unassignedLabs.length === 1 ? 'it' : 'them'} in the Assignments tab.</>}
         </Callout>
       )}
 
       <RollupLevel level="Unit" groups={units} {...shared}
-        empty="Choose a Module for each Professionalism assignment in the Professionalism tab. Each Module becomes a Unit here." />
+        empty="Choose a Module for each Professionalism assignment in the Assignments tab. Each Module becomes a Unit here." />
 
       <div className="space-y-3">
         <RollupLevel level="Term" groups={termGroups} {...shared}
@@ -315,9 +328,11 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
   const partly = group.labs.filter(l => progressByLab[l.id].some(p => p.graded) && progressByLab[l.id].some(p => !p.graded))
   const blocked = level === 'Unit' && ungraded.length > 0
 
-  const rows = students.map((student, i) => ({ student, r: results[i] }))
+  // Only students in the periods these labs cover; the rest have nothing here.
+  const coveredIds = new Set(Object.values(progressByLab).flat().map(p => p.id))
+  const rows = students.map((student, i) => ({ student, r: results[i] })).filter(x => !coveredIds.size || coveredIds.has(x.student.sectionId))
   const visibleRows = sectionFilter ? rows.filter(x => x.student.sectionId === sectionFilter) : rows
-  const sectionOptions = sections.filter(s => s.studentIds.length).map(s => ({ value: s.id, label: s.name }))
+  const sectionOptions = sections.filter(s => s.studentIds.length && (!coveredIds.size || coveredIds.has(s.id))).map(s => ({ value: s.id, label: s.name }))
   const scoredCount = rows.filter(x => x.r.value != null).length
   const names = Object.fromEntries(students.map(s => [s.userId, s.userName]))
 
@@ -445,7 +460,7 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
     <div className="space-y-4">
       <p className="text-sm text-[var(--color-text-muted)]">
         Pushes to <span className="text-[var(--color-text-body)]">&ldquo;{title}&rdquo;</span>
-        {target ? '' : ' (created on first push)'}. {scoredCount} of {students.length} students have a score.
+        {target ? '' : ' (created on first push)'}. {scoredCount} of {rows.length} students have a score.
         {tracked?.pushedAt && <> Last pushed {fmtWhen(tracked.pushedAt)}.</>}
       </p>
 

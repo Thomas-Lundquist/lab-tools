@@ -22,7 +22,7 @@ import {
   deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
 } from '../../storage/labGrading.js'
-import { seedStandingKitchens, saveStandingKitchen, isLatestLab } from '../../storage/kitchens.js'
+import { seedStandingKitchens, saveStandingKitchen, isLatestLab, newestFirst, todaysLab, labDateFor } from '../../storage/kitchens.js'
 import { planCommit, buildSection } from './commitPlan.js'
 import { runCommit, runRevert, planRevert } from './commitRun.js'
 
@@ -70,6 +70,7 @@ export default function KitchenScorePanel({
   const [progress, setProgress]       = useState('')
 
   const autosaveTimer = useRef(null)
+  const autoPicked = useRef(false) // today's lab is picked once per launch, not on every reload
   const [reloadTick, setReloadTick]   = useState(0) // bumped by "Try again" after a failed load
 
   const entry = entries.find(e => e.id === labId) ?? null
@@ -84,6 +85,23 @@ export default function KitchenScorePanel({
       .then(([labs, secs, setup, f, bank]) => { setEntries(labs); setSections(secs); setCourseSetup(setup); setFlags(f); setCommentLibrary(bank) })
       .finally(() => setLoading(false))
   }, [courseId, setupVersion])
+
+  // --- open on today's lab ---
+  // Once the course's labs load: if a lab is dated today and the remembered
+  // one isn't it, switch to today's lab (keeping the period when the lab covers
+  // it). With nothing remembered and nothing today, open the newest lab.
+  useEffect(() => { autoPicked.current = false }, [courseId])
+  useEffect(() => {
+    // entries may still be the previous course's for a moment after a switch.
+    if (autoPicked.current || !entries.length || entries[0].courseId !== courseId) return
+    autoPicked.current = true
+    const today = todaysLab(entries, sectionId)
+    if (today && today.id !== labId) {
+      onSelect(today.id, sectionId && today.dates?.[sectionId] ? sectionId : '')
+    } else if (!labId || !entries.some(e => e.id === labId)) {
+      onSelect(newestFirst(entries)[0].id, '')
+    }
+  }, [entries, courseId, labId, sectionId, onSelect])
 
   // --- which sections this lab is actually assigned to ---
   useEffect(() => {
@@ -383,13 +401,11 @@ export default function KitchenScorePanel({
       <EmptyState
         title="Nothing to grade yet"
         body="Create a Professionalism assignment first — a pairing with a lab journal, or a standalone."
-        actions={<Button onClick={onGoToLabs}>Go to Professionalism</Button>}
+        actions={<Button onClick={onGoToLabs}>Go to Assignments</Button>}
       />
     )
   }
 
-  const pairedEntries = entries.filter(e => !isStandalone(e))
-  const standaloneEntries = entries.filter(isStandalone)
   const overrideSectionIds = profOverrides
     ? new Set(profOverrides.filter(o => o.courseSectionId).map(o => o.courseSectionId))
     : null
@@ -405,6 +421,11 @@ export default function KitchenScorePanel({
     const st = section.students[s.userId]
     return st?.present !== false && st?.kitchen == null
   })
+  const counts = {
+    present: roster.filter(s => section.students[s.userId]?.present !== false).length,
+    absent: roster.filter(s => section.students[s.userId]?.present === false).length,
+    unplaced: presentUnassigned.length,
+  }
   const kitchenCount = highestKitchen(section)
   const kitchenNumbers = Array.from({ length: kitchenCount }, (_, i) => i + 1)
   const unassigned = roster.filter(s => section.students[s.userId]?.kitchen == null)
@@ -418,16 +439,9 @@ export default function KitchenScorePanel({
             <FieldLabel htmlFor="lab">Lab</FieldLabel>
             <Select id="lab" value={labId ?? ''} onChange={id => onSelect(id, '')}>
               <option value="">Select a lab</option>
-              {pairedEntries.length > 0 && (
-                <optgroup label="Pairings">
-                  {pairedEntries.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </optgroup>
-              )}
-              {standaloneEntries.length > 0 && (
-                <optgroup label="Standalone">
-                  {standaloneEntries.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </optgroup>
-              )}
+              {newestFirst(entries).map(e => (
+                <option key={e.id} value={e.id}>{labOptionLabel(e, sectionId)}</option>
+              ))}
             </Select>
           </div>
           <div className="sm:col-span-1">
@@ -540,18 +554,29 @@ export default function KitchenScorePanel({
             </Card>
           )}
 
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Edits autosave on this device. Nothing posts to Canvas until you commit.
-              {latestLab ? 'Kitchen placements carry over to this period’s next lab.' : 'This is an older lab: kitchen changes here stay with this lab.'}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {stored?.lastCommit && (
-                <Button variant="ghost" icon={Undo2} onClick={openRevert}>
-                  Revert last commit ({fmtWhen(stored.lastCommit.at)})
-                </Button>
-              )}
-              <Button onClick={openPreview}>Commit Period…</Button>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Edits autosave on this device. Nothing posts to Canvas until you commit.{' '}
+            {latestLab ? 'Kitchen placements carry over to this period’s next lab.' : 'This is an older lab: kitchen changes here stay with this lab.'}
+          </p>
+
+          {/* Sticky at the bottom of the screen: the period at a glance and Commit,
+              without scrolling past all eight kitchens. */}
+          <div className="sticky bottom-0 z-20 -mx-6 px-6 py-3 bg-[var(--color-bg-surface)] border-t-2 border-[var(--color-border-strong)]">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p className="flex-1 min-w-[12rem] text-sm text-[var(--color-text-body)]">
+                <strong>{counts.present}</strong> present · <strong>{counts.absent}</strong> absent
+                {counts.unplaced > 0 && <span className="text-[var(--color-warning)]"> · {counts.unplaced} not in a kitchen</span>}
+                {statuses[sectionId] === 'done' && <span className="text-[var(--color-success)]"> · committed</span>}
+                {statuses[sectionId] === 'draft' && <span className="text-[var(--color-text-muted)]"> · unsaved edits</span>}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {stored?.lastCommit && (
+                  <Button variant="ghost" size="sm" icon={Undo2} onClick={openRevert}>
+                    Revert last commit ({fmtWhen(stored.lastCommit.at)})
+                  </Button>
+                )}
+                <Button onClick={openPreview}>Commit Period…</Button>
+              </div>
             </div>
           </div>
         </>
@@ -818,6 +843,14 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
       )}
     </>
   )
+}
+
+// "Nov 2 · Thickener Activity Professionalism": the date for this period when
+// the lab has one, else its latest date, so the newest-first list reads at a glance.
+function labOptionLabel(entry, sectionId) {
+  const d = (sectionId && entry.dates?.[sectionId]) || Object.values(entry.dates ?? {}).filter(Boolean).sort().pop() || labDateFor(entry, null)
+  const when = d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
+  return `${when ? `${when} · ` : ''}${entry.name}${isStandalone(entry) ? ' (standalone)' : ''}`
 }
 
 // The kitchens to show: always 8, more only if a stored lab uses a higher one.

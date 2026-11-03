@@ -276,6 +276,9 @@ function GradingSection() {
         <h2 className="text-base font-semibold text-[var(--color-text-body)]">Grading</h2>
         <p className="text-sm text-[var(--color-text-muted)]">
           Your lab flags (deductions) and comment bank — one set for every course.
+          Options for a single course (A/B days, journal dates, the top score, Focus sync) are under{' '}
+          <button type="button" className="underline hover:text-[var(--color-text-body)]" onClick={() => navigate('labs')}>Course settings</button>{' '}
+          on the Labs page.
         </p>
       </div>
 

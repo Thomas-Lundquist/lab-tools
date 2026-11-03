@@ -4,7 +4,8 @@ import AppNav, { SettingsButton, BrandLogo } from '../../components/AppNav.jsx'
 import ToolShell from '../../components/ToolShell.jsx'
 import SkipLink from '../../components/SkipLink.jsx'
 import CourseSelector from '../../components/CourseSelector.jsx'
-import { Tabs, TabPanel } from '../../components/Tabs.jsx'
+import { Tabs } from '../../components/Tabs.jsx'
+import Button from '../../components/Button.jsx'
 import { useKeyboardShortcuts } from '../../utils/useKeyboardShortcuts.js'
 import ShortcutsPanel from '../../components/ShortcutsPanel.jsx'
 import { getCourses } from '../../api/courses.js'
@@ -27,15 +28,28 @@ import ScoringPanel from './ScoringPanel.jsx'
 // section. They collapsed into one period-centric "Lab" screen (present/absent +
 // kitchen grading in one pass), so the teacher picks a lab once and flows
 // create -> grade across periods without reselecting. See DECISIONS.md.
+// Grade comes first: it's the daily screen, so the app opens on it.
 const TABS = [
-  { id: 'labs', label: 'Professionalism' },
-  { id: 'lab', label: 'Lab' },
-  { id: 'scoring', label: 'Rollup' },
+  { id: 'lab', label: 'Grade' },
+  { id: 'labs', label: 'Assignments' },
+  { id: 'scoring', label: 'Unit & Term Scores' },
 ]
 
 // The working lab + period, remembered per course so a refresh or the iPad keeps
 // the teacher in place. Selection is sticky; grading drafts live in labGrading.
 const CTX_KEY = 'labWorkingContext'
+
+// A tab panel that stays mounted once opened, hidden while another tab shows.
+// Switching tabs used to unmount the panel, so every switch reloaded the roster
+// or every submission in the course. Never-opened tabs still don't load.
+function KeepAlivePanel({ tabId, activeTab, visited, children }) {
+  if (!visited.has(tabId) && tabId !== activeTab) return null
+  return (
+    <div role="tabpanel" id={`tabpanel-${tabId}`} aria-labelledby={`tab-${tabId}`} hidden={tabId !== activeTab}>
+      {children}
+    </div>
+  )
+}
 function loadCtx(courseId) {
   try { return (JSON.parse(localStorage.getItem(keyPrefix() + CTX_KEY) || '{}')[courseId]) ?? {} }
   catch { return {} }
@@ -55,6 +69,9 @@ export default function App({ initialCourseId }) {
   const [loadingCourses, setLoadingCourses] = useState(true)
   const [courseId, setCourseId]             = useState(null)
   const [tab, setTab]                       = useState(TABS[0].id)
+  // Tabs opened so far this launch; they stay mounted (KeepAlivePanel).
+  const [visited, setVisited]               = useState(() => new Set([TABS[0].id]))
+  useEffect(() => { setVisited(v => (v.has(tab) ? v : new Set([...v, tab]))) }, [tab])
   const [courseSetup, setCourseSetup]       = useState(null)
   const [setupVersion, setSetupVersion]     = useState(0)
   const [showBootstrap, setShowBootstrap]   = useState(false)
@@ -149,27 +166,14 @@ export default function App({ initialCourseId }) {
       >
         <div className="overflow-y-auto flex-1">
           <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-            <div>
-              <h1 className="text-2xl font-bold text-[var(--color-text-body)]">Labs, Attendance &amp; Professionalism</h1>
-              <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                Create Professionalism assignments (paired with a lab journal, or standalone), take attendance, score students, and roll scores up by Unit and Term.
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Tabs tabs={TABS} activeTab={tab} onChange={setTab} />
-              <button
-                onClick={() => setShowCourseSettings(true)}
-                disabled={!courseId}
-                className="p-2 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-hover)] transition-colors duration-75 disabled:opacity-40 disabled:pointer-events-none"
-                title="Course settings"
-                aria-label="Course settings"
-              >
-                <Settings size={16} />
-              </button>
+              <Button variant="ghost" size="sm" icon={Settings} onClick={() => setShowCourseSettings(true)} disabled={!courseId}>
+                Course settings
+              </Button>
             </div>
 
-            <TabPanel tabId="labs" activeTab={tab}>
+            <KeepAlivePanel tabId="labs" activeTab={tab} visited={visited}>
               <ProfessionalismPanel
                 courseId={courseId}
                 courseName={course?.name}
@@ -181,8 +185,8 @@ export default function App({ initialCourseId }) {
                 onLabRemoved={handleLabRemoved}
                 onGoToSetup={() => setShowBootstrap(true)}
               />
-            </TabPanel>
-            <TabPanel tabId="lab" activeTab={tab}>
+            </KeepAlivePanel>
+            <KeepAlivePanel tabId="lab" activeTab={tab} visited={visited}>
               <KitchenScorePanel
                 courseId={courseId}
                 courseName={course?.name}
@@ -196,14 +200,16 @@ export default function App({ initialCourseId }) {
                 onGoToSetup={() => setShowBootstrap(true)}
                 onGoToLabs={() => setTab('labs')}
               />
-            </TabPanel>
-            <TabPanel tabId="scoring" activeTab={tab}>
+            </KeepAlivePanel>
+            <KeepAlivePanel tabId="scoring" activeTab={tab} visited={visited}>
               <ScoringPanel
                 courseId={courseId}
                 courseName={course?.name}
                 loadingCourse={loadingCourses}
+                active={tab === 'scoring'}
+                dataVersion={setupVersion}
               />
-            </TabPanel>
+            </KeepAlivePanel>
           </div>
         </div>
       </ToolShell>

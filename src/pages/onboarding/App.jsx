@@ -100,10 +100,14 @@ export default function App() {
               {pinError && <p className="text-sm text-[var(--color-error)] flex items-center gap-1"><AlertCircle size={14} />{pinError}</p>}
               <p className="text-xs text-[var(--color-text-muted)]">
                 If you forget your PIN, you will need to reset Lab Tools. Your PIN cannot be recovered.
+                You can skip this and set one later in Settings, but deleting assignments from Canvas needs a PIN.
               </p>
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <button type="button" className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] underline" onClick={() => setStep('success')}>
+                Skip for now
+              </button>
               <button className="btn-primary" disabled={pin.length < 4 || pinConfirm.length < 4} onClick={handleSetPin}>
                 Set PIN
               </button>

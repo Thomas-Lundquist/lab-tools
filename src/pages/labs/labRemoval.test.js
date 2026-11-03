@@ -52,3 +52,24 @@ test('a discarded draft does not outrank a newer commit when seeding', () => {
   const b = { committed: { students: { x: { kitchen: 5 } } }, committedAt: '2026-10-15', draft: null, updatedAt: '2026-10-15' }
   assert.deepEqual(standingFromLatestLab([a, b]), { students: { x: 5 } })
 })
+
+const { todaysLab, newestFirst, localToday } = await import('../../storage/kitchens.js')
+
+test('today’s lab: prefers one dated today for this period, else any dated today', () => {
+  const a = { id: 'lab_1', dates: { p1: '2026-11-02', p2: '2026-11-03' } }
+  const b = { id: 'lab_2', dates: { p2: '2026-11-02' } }
+  assert.equal(todaysLab([a, b], 'p2', '2026-11-02').id, 'lab_2')
+  assert.equal(todaysLab([a, b], 'p1', '2026-11-02').id, 'lab_1')
+  assert.equal(todaysLab([a, b], 'p1', '2026-12-25'), null)
+})
+
+test('labs list newest first by their latest date', () => {
+  const old = { id: 'lab_1', dates: { p: '2026-09-01' } }
+  const mid = { id: 'lab_2', dates: { p: '2026-10-01', q: '2026-10-02' } }
+  const linked = { id: `lab_${Date.UTC(2026, 10, 1)}`, dates: {} }
+  assert.deepEqual(newestFirst([old, mid, linked]).map(e => e.id), [linked.id, 'lab_2', 'lab_1'])
+})
+
+test('localToday uses the local calendar date', () => {
+  assert.equal(localToday(new Date(2026, 10, 2, 21, 30)), '2026-11-02')
+})

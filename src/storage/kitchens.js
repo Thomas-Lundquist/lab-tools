@@ -73,6 +73,25 @@ export function standingFromLatestLab(states) {
   return Object.keys(students).length ? { students } : null
 }
 
+// Today as YYYY-MM-DD in the browser's zone: lab dates are typed in local
+// time, and UTC is already tomorrow by evening in Utah.
+export function localToday(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// The labs to offer, newest first (by their latest lab date in any period).
+export function newestFirst(entries) {
+  const latest = e => Object.values(e.dates ?? {}).filter(Boolean).sort().pop() || labDateFor(e, null)
+  return [...entries].sort((a, b) => latest(b).localeCompare(latest(a)) || String(b.id).localeCompare(String(a.id)))
+}
+
+// The lab to open on launch: one dated today (for this period if it has a date
+// there), else null.
+export function todaysLab(entries, sectionId, today = localToday()) {
+  const todays = entries.filter(e => Object.values(e.dates ?? {}).includes(today))
+  return todays.find(e => sectionId && e.dates?.[sectionId] === today) ?? todays[0] ?? null
+}
+
 // A lab's date for one period: its lab date there, else the day it was added.
 export function labDateFor(entry, sectionId) {
   const d = entry?.dates?.[sectionId]
@@ -84,7 +103,7 @@ export function labDateFor(entry, sectionId) {
 // Whether a kitchen move in this lab should become the period's usual kitchens:
 // yes unless a later lab (up to today; labs set up ahead of time don't count)
 // exists for the period, i.e. this is a fix to an older lab.
-export function isLatestLab(entry, entries, sectionId, today = new Date().toISOString().slice(0, 10)) {
+export function isLatestLab(entry, entries, sectionId, today = localToday()) {
   const mine = labDateFor(entry, sectionId)
   return !entries.some(e => {
     if (e.id === entry.id) return false

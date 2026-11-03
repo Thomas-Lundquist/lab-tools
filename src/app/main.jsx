@@ -10,6 +10,7 @@ import { PinGateProvider } from '../security/usePinGate.jsx'
 import SetupGuard from '../components/SetupGuard.jsx'
 import { useRoute } from '../utils/nav.js'
 import Home from '../shell/index.jsx'
+import { TOOLS } from '../config/tools.jsx'
 import LabsPage from '../pages/labs/index.jsx'
 import Settings from '../settings/index.jsx'
 import Onboarding from '../pages/onboarding/App.jsx'
@@ -24,6 +25,9 @@ import { installDiagnostics } from '../debug/diagnostics.js'
 // page with in-app routes now.
 
 const PAGES = { home: Home, labs: LabsPage, settings: Settings, debug: DebugReport }
+// With a single tool, "home" is that tool: a launcher page with one tile only
+// cost a tap on every launch. Home comes back on its own if a second tool is added.
+if (TOOLS.length === 1) PAGES.home = LabsPage
 
 function Routes() {
   const { route } = useRoute()
