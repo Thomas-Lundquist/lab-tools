@@ -192,6 +192,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
   const shared = {
     students, sections, submissionsByStudent, rollups, setRollups, courseId, courseName,
     postToSis: courseSetup?.settings?.syncUnitTermToFocus, findAssignment,
+    groupId: courseSetup?.professionalismGroupId ?? null,
     onAssignmentCreated: handleAssignmentCreated, refreshAssignment,
   }
 
@@ -302,7 +303,7 @@ function labProgress(lab, sections, submissionsByStudent) {
   }))
 }
 
-function GroupDetail({ level, group, students, sections, submissionsByStudent, rollups, setRollups, courseId, courseName, postToSis, onAssignmentCreated, refreshAssignment }) {
+function GroupDetail({ level, group, students, sections, submissionsByStudent, rollups, setRollups, courseId, courseName, postToSis, groupId, onAssignmentCreated, refreshAssignment }) {
   const toast = useToast()
   const { requirePin } = usePinGate()
   const [sectionFilter, setSectionFilter] = useState('')
@@ -368,6 +369,8 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
       if (!t) {
         t = await createAssignment(courseId, {
           name: title, pointsPossible: 4, gradingType: 'points', submissionTypes: ['none'], published: true, postToSis,
+          // In the Professionalism group, with the labs (DECISIONS.md, 2026-11-02).
+          ...(groupId ? { assignmentGroupId: groupId } : {}),
         })
         onAssignmentCreated(t)
         // A Unit score sits in its own Module, next to the labs it averages.
@@ -619,7 +622,7 @@ function PushPreview({ pushing, target, title, group, onToggle, onToggleAll }) {
     <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
       {!target && (
         <p className="text-[var(--color-text-body)]">
-          Creates &ldquo;{title}&rdquo; (4 points){group.moduleId ? ' in this Unit’s Module' : ''} first.
+          Creates &ldquo;{title}&rdquo; (4 points) in the Professionalism group{group.moduleId ? ' and this Unit’s Module' : ''} first.
         </p>
       )}
       {summary.writes === 0 ? (

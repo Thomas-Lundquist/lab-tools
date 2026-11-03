@@ -31,7 +31,7 @@ function ClearSetupConfirm({ courseName, pairings, choice, onChoiceChange, onCan
         <div>
           <h3 className="text-base font-semibold text-[var(--color-error)]">Clear setup for {courseName}?</h3>
           <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-            Resets Enabled, the Professionalism assignment group link, section day types, grading settings, and
+            Resets Enabled, the Professionalism assignment group link, period A/B days, grading settings, and
             every Term for this course back to a blank slate. Other courses are not affected.
           </p>
         </div>
@@ -191,7 +191,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
       : `Cleared setup for ${courseName} (${count} pairing${count === 1 ? '' : 's'} preserved)`
     const warning = deletePairings
       ? `This permanently deletes ${count} Professionalism assignment${count === 1 ? '' : 's'} from Canvas, including any grades already entered on them. This cannot be undone.`
-      : "This resets this course's setup — Enabled, the Professionalism group, section day types, grading settings, and Terms. Existing pairings and their Canvas assignments are left untouched."
+      : "This resets this course's setup — Enabled, the Professionalism group, period A/B days, grading settings, and Terms. Existing pairings and their Canvas assignments are left untouched."
     await requirePin(
       { action: 'clear_course_setup', summary, courseId, courseName, warning },
       () => doClearSetup(deletePairings),
@@ -215,8 +215,8 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
       ) : (
         <div className="space-y-6">
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Sections — A day / B day</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">Used to prefill each lab's due date per section.</p>
+            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Periods — A day / B day</h3>
+            <p className="text-xs text-[var(--color-text-muted)]">Sets which lab date (A day or B day) each period gets when you create a lab.</p>
             <div className="divide-y divide-[var(--color-border-subtle)]">
               {sections.map(sec => (
                 <div key={sec.id} className="flex items-center justify-between py-2">
@@ -234,7 +234,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                   </div>
                 </div>
               ))}
-              {sections.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-2">No sections found.</p>}
+              {sections.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-2">No periods found.</p>}
             </div>
           </div>
 
@@ -301,13 +301,13 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
 
           <div className="space-y-1">
             <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Terms</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">Terms are set up in the Scoring tab, next to the scores they roll up.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Terms are set up in the Unit &amp; Term Scores tab, next to the scores they roll up.</p>
           </div>
 
           <div className="space-y-3 pt-4 border-t border-[var(--color-border)]">
             <h3 className="text-sm font-semibold text-[var(--color-error)]">Danger zone</h3>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Resets this course — Enabled, the Professionalism group, section day types, grading settings, and
+              Resets this course — Enabled, the Professionalism group, period A/B days, grading settings, and
               Terms — back to a blank slate. Useful for testing setup from scratch. You'll separately choose whether
               to keep existing pairings or also delete them (and their Canvas assignments) permanently.
             </p>

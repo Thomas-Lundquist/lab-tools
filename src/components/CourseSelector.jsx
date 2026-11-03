@@ -1,7 +1,11 @@
 import { ChevronDown } from 'lucide-react'
 
+// Course names only ("Culinary 1 Semester 1"); Canvas's long term name
+// ("2027-Skyline Senior High-Semester 1") is added only where two courses share
+// a name, and is always in the tooltip.
 export default function CourseSelector({ courses, selectedId, onChange, loading }) {
   const selected = courses.find(c => String(c.id) === String(selectedId))
+  const dupName = name => courses.filter(c => c.name === name).length > 1
   const titleText = selected ? `${selected.name}${selected.term ? ` — ${selected.term}` : ''}` : undefined
 
   return (
@@ -22,7 +26,7 @@ export default function CourseSelector({ courses, selectedId, onChange, loading 
             <option value="" disabled>Select a course</option>
             {courses.map(c => (
               <option key={c.id} value={c.id}>
-                {c.name}{c.term ? ` — ${c.term}` : ''}
+                {c.name}{c.term && dupName(c.name) ? ` — ${c.term}` : ''}
               </option>
             ))}
           </>

@@ -60,7 +60,7 @@ export default function KitchenScorePanel({
   const [statuses, setStatuses]       = useState({})   // sectionId -> 'done' | 'draft' (period checkmarks)
   const [committedAt, setCommittedAt] = useState({})   // sectionId -> when this lab was last committed there
   const [due, setDue]                 = useState([])   // periods from recent lab days not committed yet
-  const [dismissed, setDismissed]     = useState(() => new Set()) // "labId:sectionId" hidden until next launch
+  const [dismissed, setDismissed]     = useState(() => new Set()) // "labId:sectionId" hidden for this launch
   const [section, setSection]         = useState(emptySection())
   const [standing, setStanding]       = useState(null) // this period's usual kitchens (storage/kitchens.js)
 
@@ -464,7 +464,7 @@ export default function KitchenScorePanel({
             <Select id="lab" value={labId ?? ''} onChange={id => onSelect(id, '')}>
               <option value="">Select a lab</option>
               {newestFirst(entries).map(e => (
-                <option key={e.id} value={e.id}>{labOptionLabel(e, sectionId)}</option>
+                <option key={e.id} value={e.id}>{labOptionLabel(e)}</option>
               ))}
             </Select>
           </div>
@@ -513,7 +513,7 @@ export default function KitchenScorePanel({
             </p>
             <button type="button" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] underline shrink-0"
               onClick={() => setDismissed(prev => new Set([...prev, ...visibleDue.map(d => `${d.labId}:${d.sectionId}`)]))}>
-              Hide until next launch
+              Hide for now
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -531,12 +531,20 @@ export default function KitchenScorePanel({
       )}
 
       {/* What the open period's state means. */}
-      {entry && sectionId && !rosterLoading && !pendingDraft && (statuses[sectionId] === 'done' || statuses[sectionId] === 'draft') && (
-        <p className={`text-sm ${statuses[sectionId] === 'done' ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}`}>
-          {statuses[sectionId] === 'done'
-            ? `✓ Committed ${fmtWhen(committedAt[sectionId])}. This is what Lab Tools sent to Canvas; change anything and commit again to update it.`
-            : '• Unsaved edits on this device. Not in Canvas yet: commit to send them.'}
-        </p>
+      {entry && sectionId && !rosterLoading && !pendingDraft && (statuses[sectionId] || stored?.lastCommit) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className={`text-sm ${statuses[sectionId] === 'done' ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}`}>
+            {statuses[sectionId] === 'done'
+              ? `✓ Committed ${fmtWhen(committedAt[sectionId])}. This is what Lab Tools sent to Canvas; change anything and commit again to update it.`
+              : '• Unsaved edits on this device. Not in Canvas yet: commit to send them.'}
+          </p>
+          {/* Up here, away from Commit, so a mis-tap on the iPad can't hit it. */}
+          {stored?.lastCommit && (
+            <Button variant="ghost" size="sm" icon={Undo2} onClick={openRevert}>
+              Revert last commit ({fmtWhen(stored.lastCommit.at)})
+            </Button>
+          )}
+        </div>
       )}
 
       {/* Resume/discard prompt: local work exists that is newer than Canvas. */}
@@ -567,7 +575,7 @@ export default function KitchenScorePanel({
       )}
 
       {!rosterLoading && entry && sectionId && roster.length === 0 && (
-        <EmptyState title="No students in this period" body="This section has no enrolled students." />
+        <EmptyState title="No students in this period" body="This period has no enrolled students." />
       )}
 
       {!rosterLoading && entry && sectionId && roster.length > 0 && (
@@ -653,14 +661,7 @@ export default function KitchenScorePanel({
                 {statuses[sectionId] === 'done' && <span className="text-[var(--color-success)]"> · committed</span>}
                 {statuses[sectionId] === 'draft' && <span className="text-[var(--color-text-muted)]"> · unsaved edits</span>}
               </p>
-              <div className="flex flex-wrap gap-2">
-                {stored?.lastCommit && (
-                  <Button variant="ghost" size="sm" icon={Undo2} onClick={openRevert}>
-                    Revert last commit ({fmtWhen(stored.lastCommit.at)})
-                  </Button>
-                )}
-                <Button onClick={openPreview}>Commit Period…</Button>
-              </div>
+              <Button onClick={openPreview}>Commit Period…</Button>
             </div>
           </div>
         </>
@@ -764,10 +765,8 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         <span className={`inline-flex items-center justify-center w-10 h-7 shrink-0 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
-        <Button size="sm" variant={absent ? 'danger' : 'success'}
-          onClick={() => onApply(s => setPresent(s, student.userId, absent))}>
-          {absent ? 'Absent' : 'Present'}
-        </Button>
+        <AttendanceSwitch absent={absent} name={student.userName}
+          onToggle={() => onApply(s => setPresent(s, student.userId, absent))} />
         {/* Collapsed-on-phone hint that flags exist underneath. */}
         {!open && !absent && st.flagIds.length > 0 && (
           <span className="md:hidden text-xs font-medium text-[var(--color-info)]">{st.flagIds.length} flag{st.flagIds.length === 1 ? '' : 's'}</span>
@@ -778,7 +777,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
           {!absent && (
             <Chip tone="exceeded" active={!!st.exceeded}
               onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
-              title="Mark this student as exceeding expectations (a true 4)">Exceeds</Chip>
+              title="Mark this student as exceeding expectations (a true 4)">Exceeded (4)</Chip>
           )}
           {absent && (
             <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -929,12 +928,39 @@ function FlagModalPicker({ title, options, selectedIds, toneFor, onToggle }) {
   )
 }
 
-// "Nov 2 · Thickener Activity Professionalism": the date for this period when
-// the lab has one, else its latest date, so the newest-first list reads at a glance.
-function labOptionLabel(entry, sectionId) {
-  const d = (sectionId && entry.dates?.[sectionId]) || Object.values(entry.dates ?? {}).filter(Boolean).sort().pop() || labDateFor(entry, null)
-  const when = d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
-  return `${when ? `${when} · ` : ''}${entry.name}${isStandalone(entry) ? ' (standalone)' : ''}`
+// "Nov 2–3 · Thickener Activity Professionalism": every lab date it has (A and
+// B days), so the label doesn't change with the period picked.
+function labOptionLabel(entry) {
+  const dates = [...new Set(Object.values(entry.dates ?? {}).filter(Boolean))].sort()
+  if (!dates.length && labDateFor(entry, null)) dates.push(labDateFor(entry, null))
+  return `${dates.length ? `${fmtDateRange(dates)} · ` : ''}${entry.name}${isStandalone(entry) ? ' (standalone)' : ''}`
+}
+
+// "Nov 2", "Nov 2–3", "Oct 30–Nov 2", or first–last for more than two.
+export function fmtDateRange(dates) {
+  const parse = d => new Date(`${d}T00:00:00`)
+  const first = parse(dates[0])
+  const last = parse(dates[dates.length - 1])
+  const month = d => d.toLocaleDateString(undefined, { month: 'short' })
+  if (dates.length === 1) return `${month(first)} ${first.getDate()}`
+  if (first.getMonth() === last.getMonth()) return `${month(first)} ${first.getDate()}–${last.getDate()}`
+  return `${month(first)} ${first.getDate()}–${month(last)} ${last.getDate()}`
+}
+
+// Present / Absent as one switch: green and "Present", or red and "Absent".
+// Only the current state's word shows; the knob slides to the other side.
+function AttendanceSwitch({ absent, name, onToggle }) {
+  return (
+    <button type="button" role="switch" aria-checked={!absent} onClick={onToggle}
+      aria-label={`${name}: ${absent ? 'absent' : 'present'}. Tap to mark ${absent ? 'present' : 'absent'}.`}
+      className={`relative shrink-0 inline-flex items-center w-[6.25rem] h-8 rounded-full transition-colors duration-150 ${
+        absent ? 'bg-[var(--color-danger-fill)]' : 'bg-[var(--color-success-fill)]'}`}>
+      <span className={`absolute top-1 w-6 h-6 rounded-full bg-[var(--color-bg-surface)] transition-[left] duration-150 ${absent ? 'left-1' : 'left-[calc(100%-1.75rem)]'}`} />
+      <span className={`w-full text-xs font-semibold text-white ${absent ? 'pl-8 pr-2 text-right' : 'pl-3 pr-8 text-left'}`}>
+        {absent ? 'Absent' : 'Present'}
+      </span>
+    </button>
+  )
 }
 
 // The kitchens to show: always 8, more only if a stored lab uses a higher one.

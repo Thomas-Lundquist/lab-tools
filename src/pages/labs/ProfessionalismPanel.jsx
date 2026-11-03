@@ -30,9 +30,9 @@ const STANDALONE = 'standalone'
 // assignment is visible to the whole course. 'A' / 'B' restrict it to the
 // sections tagged with that day type in Course Settings.
 const SCOPE_OPTIONS = [
-  { value: 'all', label: 'All sections' },
-  { value: 'A', label: 'A-day sections only' },
-  { value: 'B', label: 'B-day sections only' },
+  { value: 'all', label: 'All periods' },
+  { value: 'A', label: 'A-day periods only' },
+  { value: 'B', label: 'B-day periods only' },
 ]
 
 // Which sections a given scope targets. 'all' is every section; an 'A'/'B'
@@ -109,7 +109,7 @@ function journalOverrideDates(labDate, dueOffsetDays, closeOffsetDays) {
 // back to "Custom" rather than claiming a day it can't prove.
 function scopeBadge(assignment, courseSetup) {
   if (!assignment) return null
-  if (!assignment.onlyVisibleToOverrides) return 'All sections'
+  if (!assignment.onlyVisibleToOverrides) return 'All periods'
   const sectionOverrides = (assignment.overrides ?? []).filter(o => o.courseSectionId)
   if (sectionOverrides.length === 0) return 'Custom'
   const dayTypes = new Set(sectionOverrides.map(o => courseSetup?.sections?.[o.courseSectionId]?.dayType))
@@ -180,7 +180,7 @@ function SectionDatesAccordion({ sections, dates, onChange }) {
   return (
     <details>
       <summary className="cursor-pointer text-sm font-medium text-[var(--color-text-body)] select-none">
-        Per-section lab dates
+        Lab date for each period
       </summary>
       <div className="mt-3 space-y-2">
         {sections.map(sec => (
@@ -239,8 +239,8 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
 
   async function handleAdd() {
     const sec = sections.find(s => s.id === sectionId)
-    if (!sec) { toast('Choose a section to add.', 'warning'); return }
-    if (!labDate) { toast('Enter the lab date for the section.', 'warning'); return }
+    if (!sec) { toast('Choose a period to add.', 'warning'); return }
+    if (!labDate) { toast('Enter the lab date for the period.', 'warning'); return }
     setBusy(true)
     try {
       // Professionalism: opens and closes on the lab day. Journal (pairings
@@ -262,7 +262,7 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
       await loadOverrides()
       onAdded?.()
     } catch (err) {
-      toast(`Could not add the section: ${err.message}`, 'error')
+      toast(`Could not add the period: ${err.message}`, 'error')
     } finally {
       setBusy(false)
     }
@@ -297,7 +297,7 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
         <div className="flex items-center gap-1 shrink-0">
           {sections.length > 0 && assignmentId && (
             <Button variant="ghost" size="sm" icon={Plus} onClick={toggleOpen} aria-expanded={open}>
-              {open ? 'Close' : 'Add a section'}
+              {open ? 'Close' : 'Add a period'}
             </Button>
           )}
           <button
@@ -315,19 +315,19 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
       {open && (
         <div className="mt-2 rounded-[var(--radius-control)] bg-[var(--color-bg-hover)] p-3 space-y-3">
           {overrides === null ? (
-            <p className="text-xs text-[var(--color-text-muted)]">Loading sections…</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Loading periods…</p>
           ) : availableSections.length === 0 ? (
-            <p className="text-xs text-[var(--color-text-muted)]">Every section already has a date on this assignment.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Every period already has a date on this assignment.</p>
           ) : (
             <>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
-                  <FieldLabel htmlFor={`sec-${entry.id}`}>Section</FieldLabel>
+                  <FieldLabel htmlFor={`sec-${entry.id}`}>Period</FieldLabel>
                   <Select
                     id={`sec-${entry.id}`}
                     value={sectionId}
                     onChange={setSectionId}
-                    placeholder="Select a section"
+                    placeholder="Select a period"
                     options={availableSections.map(s => ({ value: s.id, label: s.name }))}
                   />
                 </div>
@@ -337,7 +337,7 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
                 </div>
               </div>
               <Button size="sm" icon={Plus} onClick={handleAdd} disabled={busy}>
-                {busy ? 'Adding…' : 'Add section'}
+                {busy ? 'Adding…' : 'Add period'}
               </Button>
             </>
           )}
@@ -583,6 +583,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   // Which form is open above the list: 'create', 'link', or null (list only).
   // With nothing tracked yet the create form shows on its own.
   const [mode, setMode]               = useState(null)
+  const [showAllJournals, setShowAllJournals] = useState(false)
   const [removing, setRemoving]       = useState(null) // entry in the delete modal
   const [loading, setLoading]         = useState(false)
   const [sections, setSections]       = useState([])
@@ -697,7 +698,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     // records — a title without the word would be created fine and then
     // silently never show up there.
     if (!isProfessionalismAssignment(name.trim())) {
-      toast('The title needs the word "Professionalism" so Scoring can find it.', 'warning')
+      toast('The title needs the word "Professionalism" so Unit & Term Scores can find it.', 'warning')
       return
     }
     // Re-read setup straight from storage instead of trusting the courseSetup
@@ -710,7 +711,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     const scoped = scope !== 'all'
     const targetSections = sectionsInScope(sections, freshSetup, scope)
     if (scoped && targetSections.length === 0) {
-      toast(`No sections are tagged ${scope}-day. Tag one in Course Settings, or choose All sections.`, 'warning')
+      toast(`No periods are set as ${scope} day. Set one in Course settings, or choose All periods.`, 'warning')
       return
     }
     const expectedTitle = name.trim()
@@ -903,8 +904,11 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   // to attach a new professionalism score to.
   const pairedJournalAssignmentIds = new Set(entries.map(e => e.journalAssignmentId).filter(Boolean))
   const journalCandidates = assignments.filter(a => !isProfessionalismAssignment(a.name) && !pairedJournalAssignmentIds.has(a.id))
-  const labJournalOptions = journalCandidates.filter(a => a.published && /lab/i.test(a.name))
-  const otherJournalOptions = journalCandidates.filter(a => !labJournalOptions.includes(a))
+  // Lab journals and lab submissions; makeups, proposals, supplements and the
+  // syllabus are never a journal, so they wait behind "Show all assignments".
+  const likelyJournal = a => (/journal/i.test(a.name) || /\blab\b/i.test(a.name)) && !/makeup|proposal|syllabus|supplement/i.test(a.name)
+  const labJournalOptions = journalCandidates.filter(a => a.published && likelyJournal(a))
+  const otherJournalOptions = showAllJournals ? journalCandidates.filter(a => !labJournalOptions.includes(a)) : []
 
   function handleRemoved(entry, deletedFromCanvas) {
     setEntries(prev => prev.filter(e => e.id !== entry.id))
@@ -950,6 +954,10 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
             otherOptions={otherJournalOptions}
             requireChoice
           />
+          <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+            <input type="checkbox" checked={showAllJournals} onChange={e => setShowAllJournals(e.target.checked)} />
+            Show all assignments (not just lab journals)
+          </label>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             {standalone
               ? 'A professionalism score for a day with no lab activity. At attendance, marking a student absent only zeros this score — there’s no journal to lock.'
@@ -968,7 +976,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           />
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             The exact title of the Canvas assignment (0–4 points) that holds the score. Must include
-            &ldquo;Professionalism&rdquo; so Scoring can find it.
+            &ldquo;Professionalism&rdquo; so Unit &amp; Term Scores can find it.
           </p>
         </div>
 
@@ -982,10 +990,10 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           <Select id="scope" value={scope} onChange={setScope} options={SCOPE_OPTIONS} className="max-w-xs" />
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             {scope === 'all'
-              ? 'Visible to every section. Fill in per-section dates below only where they differ.'
+              ? 'Visible to every period. Set a period’s own date below only where it differs.'
               : scopeInScopeCount === 0
-                ? `No sections are tagged ${scope}-day yet. Tag one in Course Settings, or choose All sections.`
-                : `Visible to the ${scopeInScopeCount} ${scope}-day section${scopeInScopeCount === 1 ? '' : 's'} only. Other sections won’t see it — add them later from the list above.`}
+                ? `No periods are set as ${scope} day yet. Set one in Course settings, or choose All periods.`
+                : `Visible to the ${scopeInScopeCount} ${scope}-day period${scopeInScopeCount === 1 ? '' : 's'} only. Other periods won’t see it; add them later with Add a period.`}
           </p>
         </div>
 
@@ -1056,7 +1064,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
                 : <>{dupPrompt.matches.length} assignments titled &ldquo;{dupPrompt.ctx.expectedTitle}&rdquo; already exist in this course.</>}
             </p>
             <p><strong>Reuse existing</strong> grades the lab on the assignment already there — the usual choice when you meant the same lab.</p>
-            <p><strong>Create anyway</strong> makes a second copy with the same title. Scoring finds professionalism assignments by name, so two copies will collide there.</p>
+            <p><strong>Create anyway</strong> makes a second copy with the same title. Unit &amp; Term Scores finds professionalism assignments by name, so both copies would count there.</p>
           </div>
         </Modal>
       )}

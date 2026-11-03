@@ -3,7 +3,13 @@ import { ChevronDown, Check, Settings } from 'lucide-react'
 import { TOOLS, MODULES } from '../config/tools.jsx'
 import { navigate } from '../utils/nav.js'
 
-export default function AppNav({ current }) {
+export default function AppNav(props) {
+  // Only one tool so far: a menu to switch tools would have nothing to switch to.
+  if (TOOLS.length < 2) return null
+  return <ToolMenu {...props} />
+}
+
+function ToolMenu({ current }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const triggerRef = useRef(null)

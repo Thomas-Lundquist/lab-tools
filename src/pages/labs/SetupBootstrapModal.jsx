@@ -52,7 +52,7 @@ export default function SetupBootstrapModal({ courseId, courseName, setup, onSet
   return (
     <Modal
       title={`Set up ${courseName ?? 'this course'}`}
-      subtitle="These two steps unlock Professionalism, Attendance, and Scoring for this course."
+      subtitle="These two steps unlock Grade, Assignments, and Unit &amp; Term Scores for this course."
       onClose={onClose}
       size="sm"
       footer={<Button onClick={onClose} disabled={!ready}>{ready ? 'Done' : 'Finish setup to continue'}</Button>}
