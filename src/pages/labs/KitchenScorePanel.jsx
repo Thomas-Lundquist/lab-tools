@@ -958,7 +958,7 @@ function AttendanceSwitch({ absent, name, onToggle }) {
         absent ? 'bg-[var(--color-danger-fill)]' : 'bg-[var(--color-success-fill)]'}`}>
       {absent
         ? <X size={14} strokeWidth={3.5} aria-hidden="true" className="shrink-0" />
-        : <span aria-hidden="true" className="shrink-0 w-3 h-3 m-px rounded-full bg-white" />}
+        : <span aria-hidden="true" className="shrink-0 w-3 h-3 m-px rounded-full bg-current" />}
       <span className="text-xs font-bold uppercase tracking-wider">{absent ? 'Absent' : 'Present'}</span>
     </button>
   )
