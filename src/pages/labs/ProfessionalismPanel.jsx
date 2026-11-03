@@ -612,6 +612,10 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [linkSearch, setLinkSearch]         = useState('')
   const [linkModuleById, setLinkModuleById] = useState({})
   const [linkingId, setLinkingId]           = useState(null)
+  // Linking several at once: the ticked rows, and progress while it runs.
+  const [linkSelected, setLinkSelected]     = useState(() => new Set())
+  const [bulkProgress, setBulkProgress]     = useState(null) // "3 of 6" while linking
+  const [showUnpublished, setShowUnpublished] = useState(false)
 
   useEffect(() => {
     if (!courseId) { setSections([]); setAssignments([]); setModules([]); setEntries([]); setCourseSetup(null); return }
@@ -843,21 +847,50 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     }
   }
 
+  // Track one existing assignment, in its Module. The Module item is added in
+  // Canvas only if the assignment isn't already in that Module.
+  async function linkOne(assignment, moduleId) {
+    if (moduleId) await ensureModuleItem(courseId, moduleId, assignment.id)
+    const entry = await saveLab({
+      courseId,
+      moduleId: moduleId || null,
+      name: assignment.name,
+      professionalismAssignmentId: assignment.id,
+      journalAssignmentId: null,
+      dates: {},
+      closeDates: {},
+      origin: 'linked',
+    })
+    setEntries(prev => [...prev, entry])
+    return entry
+  }
+
+  // Link every ticked row with the Module shown on it. One at a time, so a
+  // failure on one doesn't stop the rest; no jump to Grade afterwards.
+  async function handleLinkSelected(rows) {
+    const failures = []
+    let done = 0
+    setBulkProgress(`0 of ${rows.length}`)
+    for (const a of rows) {
+      try {
+        await linkOne(a, moduleFor(a))
+      } catch (err) {
+        failures.push({ name: a.name, message: err.message })
+      }
+      setBulkProgress(`${++done} of ${rows.length}`)
+    }
+    setBulkProgress(null)
+    setLinkSelected(new Set())
+    onChanged?.()
+    const ok = rows.length - failures.length
+    if (failures.length) toast(`Linked ${ok} of ${rows.length}. Couldn't link ${failures.map(f => `"${f.name}"`).join(', ')}: ${failures[0].message}`, 'warning')
+    else toast(`Linked ${ok} assignment${ok === 1 ? '' : 's'}`, 'success')
+  }
+
   async function handleLink(assignment, moduleId) {
     setLinkingId(assignment.id)
     try {
-      if (moduleId) await ensureModuleItem(courseId, moduleId, assignment.id)
-      const entry = await saveLab({
-        courseId,
-        moduleId: moduleId || null,
-        name: assignment.name,
-        professionalismAssignmentId: assignment.id,
-        journalAssignmentId: null,
-        dates: {},
-        closeDates: {},
-        origin: 'linked',
-      })
-      setEntries(prev => [...prev, entry])
+      const entry = await linkOne(assignment, moduleId)
       setMode(null)
       toast(`Linked "${assignment.name}" — opening it for grading`, 'success')
       onChanged?.()
@@ -895,7 +928,27 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
 
   const trackedProfessionalismAssignmentIds = new Set(entries.map(e => e.professionalismAssignmentId))
   const linkableProfessionalismAssignments = assignments.filter(a => isProfessionalismAssignment(a.name) && !trackedProfessionalismAssignmentIds.has(a.id))
-  const linkMatches = linkableProfessionalismAssignments.filter(a => a.name.toLowerCase().includes(linkSearch.trim().toLowerCase()))
+  // Unpublished ones can't hold grades (usually last year's or templates), so they
+  // wait behind a checkbox. Published first, then by name.
+  const unpublishedCount = linkableProfessionalismAssignments.filter(a => !a.published).length
+  const linkMatches = linkableProfessionalismAssignments
+    .filter(a => showUnpublished || a.published)
+    .filter(a => a.name.toLowerCase().includes(linkSearch.trim().toLowerCase()))
+    .sort((a, b) => (b.published - a.published) || a.name.localeCompare(b.name, undefined, { numeric: true }))
+  // A row's Module: what the teacher picked, else the Module it's already in on Canvas.
+  const canvasModule = a => (a.moduleIds ?? []).map(String).find(mid => modules.some(m => m.id === mid)) ?? ''
+  const moduleFor = a => linkModuleById[a.id] ?? canvasModule(a)
+  const selectedRows = linkMatches.filter(a => linkSelected.has(a.id))
+  const allShownSelected = linkMatches.length > 0 && linkMatches.every(a => linkSelected.has(a.id))
+  function toggleLinkRow(id) {
+    setLinkSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+  function toggleAllShown() {
+    setLinkSelected(allShownSelected ? new Set() : new Set(linkMatches.map(a => a.id)))
+  }
+  function setModuleForSelected(mid) {
+    setLinkModuleById(prev => ({ ...prev, ...Object.fromEntries(selectedRows.map(a => [a.id, mid])) }))
+  }
 
   // Candidates for the "journal" link: any assignment not already used as a
   // journal elsewhere, and not itself a professionalism/score assignment.
@@ -1072,24 +1125,60 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       {formOpen === 'link' && (
       <Card className="space-y-4">
         <div>
-          <h2 className="text-base font-semibold text-[var(--color-text-body)]">Link an existing Professionalism assignment</h2>
+          <h2 className="text-base font-semibold text-[var(--color-text-body)]">Link existing Professionalism assignments</h2>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            Grade a professionalism assignment you already made in Canvas. Search by name, pick a Module if you
-            want it in a Unit rollup, then Link — it opens in the Lab tab for grading.
+            Track professionalism assignments you already made in Canvas, so they count in Unit and Term scores.
+            Each row starts with the Module it&rsquo;s in on Canvas; change it if needed. Tick several and use Link selected,
+            or Link one to open it for grading.
           </p>
         </div>
 
-        <TextField
-          value={linkSearch}
-          onChange={setLinkSearch}
-          placeholder="Search professionalism assignments"
-          aria-label="Search professionalism assignments"
-          className="max-w-sm"
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <TextField
+            value={linkSearch}
+            onChange={setLinkSearch}
+            placeholder="Search professionalism assignments"
+            aria-label="Search professionalism assignments"
+            className="max-w-sm flex-1 min-w-[12rem]"
+          />
+          {unpublishedCount > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+              <input type="checkbox" checked={showUnpublished} onChange={e => setShowUnpublished(e.target.checked)} />
+              Show unpublished ({unpublishedCount})
+            </label>
+          )}
+        </div>
+
+        {/* Bulk bar: select all shown, give the ticked rows one Module, link them. */}
+        {linkMatches.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-control)] bg-[var(--color-bg-hover)] px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-[var(--color-text-body)]">
+              <input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} aria-label="Select all shown" />
+              {selectedRows.length ? `${selectedRows.length} selected` : 'Select all'}
+            </label>
+            <Select
+              value=""
+              onChange={v => v && setModuleForSelected(v === 'none' ? '' : v)}
+              disabled={!selectedRows.length}
+              aria-label="Set the Module for the selected assignments"
+              className="w-56"
+              options={[{ value: '', label: 'Set Module for selected…' }, { value: 'none', label: 'No module' }, ...modules.map(m => ({ value: m.id, label: m.name }))]}
+            />
+            <div className="ml-auto">
+              <Button size="sm" icon={Link2} onClick={() => handleLinkSelected(selectedRows)} disabled={!selectedRows.length || !!bulkProgress}>
+                {bulkProgress ? `Linking ${bulkProgress}…` : `Link selected${selectedRows.length ? ` (${selectedRows.length})` : ''}`}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {linkableProfessionalismAssignments.length === 0 ? (
           <p className="text-sm text-[var(--color-text-muted)]">
             Every professionalism assignment in this course is already linked, or none exist yet.
+          </p>
+        ) : !showUnpublished && unpublishedCount === linkableProfessionalismAssignments.length ? (
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Every published professionalism assignment is already linked. Only unpublished ones are left.
           </p>
         ) : linkMatches.length === 0 ? (
           <p className="text-sm text-[var(--color-text-muted)]">No assignment matches &ldquo;{linkSearch}&rdquo;.</p>
@@ -1097,16 +1186,22 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           <div className="max-h-96 overflow-y-auto divide-y divide-[var(--color-border-subtle)] rounded-[var(--radius-card)] border border-[var(--color-border)]">
             {linkMatches.map(a => (
               <div key={a.id} className="flex items-center justify-between gap-3 px-3 py-2 flex-wrap">
-                <span className="text-sm text-[var(--color-text-body)] flex-1 min-w-[12rem] truncate" title={a.name}>{a.name}</span>
+                <label className="flex items-center gap-2 flex-1 min-w-[12rem] min-w-0">
+                  <input type="checkbox" checked={linkSelected.has(a.id)} onChange={() => toggleLinkRow(a.id)} aria-label={`Select ${a.name}`} />
+                  <span className="text-sm text-[var(--color-text-body)] truncate" title={a.name}>{a.name}</span>
+                  {!a.published && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] whitespace-nowrap">Unpublished</span>
+                  )}
+                </label>
                 <div className="flex items-center gap-2">
                   <Select
-                    value={linkModuleById[a.id] ?? ''}
+                    value={moduleFor(a)}
                     onChange={v => setLinkModuleById(prev => ({ ...prev, [a.id]: v }))}
                     aria-label={`Module for ${a.name}`}
                     className="w-40"
                     options={[{ value: '', label: 'No module' }, ...modules.map(m => ({ value: m.id, label: m.name }))]}
                   />
-                  <Button size="sm" icon={Link2} onClick={() => handleLink(a, linkModuleById[a.id] ?? '')} disabled={linkingId === a.id}>
+                  <Button size="sm" variant="secondary" icon={Link2} onClick={() => handleLink(a, moduleFor(a))} disabled={linkingId === a.id || !!bulkProgress}>
                     {linkingId === a.id ? 'Linking…' : 'Link'}
                   </Button>
                 </div>
