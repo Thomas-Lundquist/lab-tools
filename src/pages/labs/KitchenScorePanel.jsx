@@ -774,18 +774,21 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         {/* Controls — inline on md+, collapsible on phone. display:contents lets the
             children join the row's flex layout directly, so there is one markup. */}
         <div className={`${open ? 'contents' : 'hidden'} md:contents`}>
-          {!absent && (
-            <Chip tone="exceeded" active={!!st.exceeded}
-              onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
-              title="Mark this student as exceeding expectations (a true 4)">Exceeded (4)</Chip>
-          )}
-          {absent && (
-            <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
-              <input type="checkbox" checked={!!st.excused}
+          {/* Exceeded (present) and Excused (absent) share one slot, as wide as
+              the wider of the two: both are laid out in the same grid cell and the
+              inactive one is hidden, so flipping Present/Absent never shifts the row. */}
+          <span className="grid shrink-0 items-center">
+            <span className={`[grid-area:1/1] ${absent ? 'invisible' : ''}`} aria-hidden={absent || undefined}>
+              <Chip tone="exceeded" active={!!st.exceeded}
+                onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
+                title="Mark this student as exceeding expectations (a true 4)">Exceeded (4)</Chip>
+            </span>
+            <label className={`[grid-area:1/1] flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] ${absent ? '' : 'invisible'}`} aria-hidden={!absent || undefined}>
+              <input type="checkbox" checked={!!st.excused} tabIndex={absent ? 0 : -1}
                 onChange={() => onApply(s => ({ ...s, students: { ...s.students, [student.userId]: { ...s.students[student.userId], excused: !st.excused } } }))} />
               Excused
             </label>
-          )}
+          </span>
           <Select
             value={st.kitchen == null ? '' : String(st.kitchen)}
             onChange={v => onAssignKitchen(student.userId, v === '' ? null : Number(v))}
@@ -795,14 +798,16 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
               ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
             ]}
           />
-          {!absent && (
+          {/* Flags don't apply to an absent student, but the button keeps its
+              space (hidden) so the comment box doesn't jump left. */}
+          <span className={`shrink-0 ${absent ? 'invisible' : ''}`} aria-hidden={absent || undefined}>
             <FlagModalPicker
               title={`${student.userName} — add flags`}
               options={individualFlags}
               selectedIds={st.flagIds}
               onToggle={id => onApply(s => toggleStudentFlag(s, student.userId, id))}
             />
-          )}
+          </span>
           <div className="w-full md:flex-1 md:min-w-[14rem] flex items-center gap-1">
             <input
               type="text"
