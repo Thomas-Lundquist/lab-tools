@@ -783,11 +783,13 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
                 onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
                 title="Mark this student as exceeding expectations (a true 4)">Exceeded (4)</Chip>
             </span>
-            <label className={`[grid-area:1/1] flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] ${absent ? '' : 'invisible'}`} aria-hidden={!absent || undefined}>
-              <input type="checkbox" checked={!!st.excused} tabIndex={absent ? 0 : -1}
-                onChange={() => onApply(s => ({ ...s, students: { ...s.students, [student.userId]: { ...s.students[student.userId], excused: !st.excused } } }))} />
-              Excused
-            </label>
+            <span className={`[grid-area:1/1] ${absent ? '' : 'invisible'}`} aria-hidden={!absent || undefined}>
+              <Chip tone="excused" active={!!st.excused}
+                onClick={() => onApply(s => ({ ...s, students: { ...s.students, [student.userId]: { ...s.students[student.userId], excused: !st.excused } } }))}
+                title={st.excused ? 'Excused absence: Canvas excused, doesn’t count against the grade. Tap to make it unexcused.' : 'Mark this absence as excused (Canvas excused, doesn’t count against the grade)'}>
+                {st.excused ? '✓ Excused' : 'Excused'}
+              </Chip>
+            </span>
           </span>
           <Select
             value={st.kitchen == null ? '' : String(st.kitchen)}

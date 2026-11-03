@@ -6,6 +6,7 @@
 // forbids raw hex / bare Tailwind colors, so every color here is a --color-*):
 //   minor      -> warning  (amber)   critical -> danger (red)
 //   individual -> info     (blue)    exceeded -> success (green)
+//   excused    -> info     (blue): an excused absence, which doesn't count
 //   note / deduct are kept for the legacy ScorePanel.
 
 // All active tones use *-fill tokens: fixed dark colors that keep white text
@@ -16,6 +17,7 @@ const TONES = {
   critical:   'border-[var(--color-danger-fill)] text-white bg-[var(--color-danger-fill)]',
   individual: 'border-[var(--color-info-fill)] text-white bg-[var(--color-info-fill)]',
   exceeded:   'border-[var(--color-success-fill)] text-white bg-[var(--color-success-fill)]',
+  excused:    'border-[var(--color-info-fill)] text-white bg-[var(--color-info-fill)]',
   note:       'border-[var(--color-info-fill)] text-white bg-[var(--color-info-fill)]',
   deduct:     'border-[var(--color-danger-fill)] text-white bg-[var(--color-danger-fill)]',
 }
