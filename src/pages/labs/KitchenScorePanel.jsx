@@ -289,7 +289,18 @@ export default function KitchenScorePanel({
     setOverwrite(none)
     try {
       const canvas = await loadCanvasSnapshot()
-      setPreview({ plan: buildPlan(canvas, none), canvas })
+      const plan = buildPlan(canvas, none)
+      setPreview({ plan, canvas })
+      // Canvas already holds exactly what this period would send, and nobody
+      // differs there: the work is in Canvas, so the period is committed. Recorded
+      // automatically (the previous commit stays the one Revert undoes). Anything
+      // that differs, or any student held as changed in Canvas, leaves it unsaved.
+      if (plan.summary.writes === 0 && plan.summary.held === 0 && periodStatus(stored) !== 'done') {
+        const posted = Object.fromEntries(plan.students.filter(s => s.after).map(s => [s.userId, { prof: s.after }]))
+        clearTimeout(autosaveTimer.current)
+        setStored(await commitLabGrading(labId, sectionId, section, { posted, keepLastCommit: true }))
+        setPendingDraft(null)
+      }
     } catch (err) {
       setPreview({ error: err.message })
     }
@@ -311,10 +322,7 @@ export default function KitchenScorePanel({
     try {
       // Re-read Canvas right before writing: the plan acts on the latest state.
       const plan = buildPlan(await loadCanvasSnapshot())
-      // Canvas already matches: nothing to send, but the period is recorded as
-      // committed (and the previous commit stays the one Revert undoes).
-      const nothingToSend = plan.summary.writes === 0
-      const { failures, record } = nothingToSend ? { failures: [], record: null } : await runCommit(plan, {
+      const { failures, record } = await runCommit(plan, {
         courseId, entry,
         onProgress: (done, total) => setProgress(`${done} of ${total} students saved…`),
       })
@@ -326,7 +334,7 @@ export default function KitchenScorePanel({
       const posted = Object.fromEntries(plan.students
         .filter(s => s.after && !failed.has(s.userId))
         .map(s => [s.userId, { prof: s.after }]))
-      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0, posted, keepLastCommit: nothingToSend })
+      const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0, posted })
       setStored(nextStored)
       setPendingDraft(null)
       await refreshScores()
@@ -336,9 +344,7 @@ export default function KitchenScorePanel({
         toast(`${failures.length} of ${plan.students.length} didn't save (${names}${failures.length > 3 ? '…' : ''}). Your work is kept — commit again to retry. Details: Settings › Testing › Diagnostics`, 'warning')
       } else {
         const held = plan.summary.held
-        toast(nothingToSend
-          ? `Marked ${entry.name} as committed for this period. Nothing needed sending.`
-          : `Committed ${entry.name}${held ? `. ${held} student${held === 1 ? '' : 's'} changed in Canvas left as is` : ''}`, 'success')
+        toast(`Committed ${entry.name}${held ? `. ${held} student${held === 1 ? '' : 's'} changed in Canvas left as is` : ''}`, 'success')
       }
       onChanged?.()
     } catch (err) {
@@ -692,11 +698,9 @@ export default function KitchenScorePanel({
           onClose={() => !saving && setConfirming(false)}
           footer={<>
             <Button variant="secondary" onClick={() => setConfirming(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleCommit} disabled={saving || !preview?.plan}>
+            <Button onClick={handleCommit} disabled={saving || !preview?.plan || preview.plan.summary.writes === 0}>
               <span className="flex items-center gap-1.5">{saving && <Loader size={13} className="animate-spin" />}
-                {!preview?.plan ? 'Commit'
-                  : preview.plan.summary.writes === 0 ? 'Mark as committed'
-                    : `Commit ${preview.plan.summary.writes} change${preview.plan.summary.writes === 1 ? '' : 's'}`}
+                {preview?.plan ? `Commit ${preview.plan.summary.writes} change${preview.plan.summary.writes === 1 ? '' : 's'}` : 'Commit'}
               </span>
             </Button>
           </>}
@@ -1046,8 +1050,8 @@ function CommitPreview({ preview, presentUnassigned, entry, onToggleOverwrite })
       {summary.writes === 0 ? (
         <p className="text-[var(--color-text-body)]">
           {summary.held
-            ? 'Nothing to send unless you choose Overwrite below. Mark as committed records the period as done and leaves those students as they are in Canvas.'
-            : 'Canvas already matches this period, so nothing will be sent. Mark as committed records the period as done.'}
+            ? 'Nothing to send unless you choose Overwrite below.'
+            : 'Canvas already has everything for this period, so nothing needs sending. It now shows as committed.'}
         </p>
       ) : (
         <ul className="space-y-0.5 text-[var(--color-text-body)]">
