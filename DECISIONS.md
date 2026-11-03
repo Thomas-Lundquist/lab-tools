@@ -137,3 +137,11 @@ Students make up labs at home, and the teacher types the makeup score straight i
 
 **2026-11-02 — Unit and Term scores: a plain average of the labs, nothing dropped, no automatic zero.** (Decided; built in the rollup work.)
 Makeups (2 per semester, 1 per term, tracked in a separate Canvas assignment) make an absence zero a placeholder, not a final grade. Dropping the lowest lab and "missed half → 0" were built for permanent zeros. The 50% rule double-counts absences that already score 0, and it creates a cliff: one makeup could move a unit from 0% to about 67%. Both levels now average their labs on the 4-point scale, so the Term weights each lab equally, however labs split into units. Excused labs don't count; blank labs are flagged.
+
+**2026-11-02 — Scoring tab: status at a glance, previewed and revertible pushes, Terms set up in Scoring.**
+- Rules as decided above: Unit and Term are plain averages of their labs. A Term now averages its labs directly instead of averaging Unit score assignments, so it no longer depends on Units having been pushed first.
+- Each Unit and Term shows **Not pushed**, **Up to date**, or **Out of date (N)**: computed live from Canvas, comparing the current average with what the score assignment holds. A makeup or regrade after a push shows up here.
+- Per lab, the period chips show which periods have grades. A Unit can't be pushed while a lab has no grades in any period. If a lab is graded in some periods but not others, that's only a warning.
+- **Push** works like Commit Period (`rollupPush.js`): a preview, only changed scores sent, a score Lab Tools pushed is cleared once no labs back it, excused is never touched, and a score changed in Canvas since Lab Tools pushed it is held with Overwrite (and Overwrite all). That includes scores that were already there before tracking began. **Revert last push** restores the scores from before, skipping any changed since. What was pushed is kept in `storage/rollups.js` (synced, `rollups/<courseId>`).
+- A new Unit score assignment is added to its Module. Its assignment group is unchanged (Canvas's default) pending a decision: putting it in the Professionalism group could double-count labs if that group is weighted.
+- Terms moved from Course Settings to the Scoring tab ("Edit Terms"). A Module already in another Term is dimmed, since its labs would count in both.

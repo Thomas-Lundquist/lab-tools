@@ -14,64 +14,46 @@ function score(labs) {
   return scoreStudent(subs, defs).value
 }
 
-// PLAN.md Section 2 test table.
-test('two labs, no drop', () => {
-  assert.equal(score([{ score: 4 }, { score: 3.6 }]), 3.8)
+// Plain average on a 4-point scale; nothing dropped, no automatic zero (DECISIONS.md, 2026-11-02).
+test('two labs average', () => {
+  assert.equal(score([{ score: 4 }, { score: 3 }]), 3.5)
 })
 
-test('one of two missed is half', () => {
-  assert.equal(score([{ score: 4 }, { score: 0 }]), 0)
+test('a missed lab counts as 0 in the average, not as a unit zero', () => {
+  assert.equal(score([{ score: 4 }, { score: 0 }]), 2)
+  assert.equal(score([{ score: 4 }, { score: 4 }, { score: 0 }, { score: 0 }]), 2)
 })
 
-test('single lab missed', () => {
+test('the lowest lab is not dropped', () => {
+  assert.equal(score([{ score: 4 }, { score: 4 }, { score: 1 }]), 3)
+})
+
+test('a single missed lab is 0', () => {
   assert.equal(score([{ score: 0 }]), 0)
 })
 
-test('single lab, no drop', () => {
-  assert.equal(score([{ score: 3 }]), 3)
-})
-
-test('lowest dropped', () => {
-  assert.equal(score([{ score: 4 }, { score: 2 }, { score: 3 }]), 3.5)
-})
-
-test('one of three missed; the 0 is the dropped score', () => {
-  assert.equal(score([{ score: 4 }, { score: 0 }, { score: 3 }]), 3.5)
-})
-
-test('two of four missed is half', () => {
-  assert.equal(score([{ score: 4 }, { score: 0 }, { score: 3 }, { score: 0 }]), 0)
-})
-
-test('the 0 is dropped (four labs)', () => {
-  assert.equal(score([{ score: 4 }, { score: 0 }, { score: 3 }, { score: 2 }]), 3)
-})
-
-test('excused not counted, so one of two missed', () => {
-  assert.equal(score([{ score: 'EX' }, { score: 0 }, { score: 4 }]), 0)
-})
-
-test('excused not counted, two labs, no drop', () => {
-  assert.equal(score([{ score: 'EX' }, { score: 3 }, { score: 4 }]), 3.5)
-})
-
-test('blank not counted', () => {
-  assert.equal(score([{ score: null }, { score: 3 }, { score: 4 }]), 3.5)
+test('excused and blank labs are not counted', () => {
+  assert.equal(score([{ score: 3 }, { score: 'EX' }, { score: null }]), 3)
 })
 
 test('nothing counted gives no score', () => {
   assert.equal(score([{ score: null }, { score: 'EX' }]), null)
 })
 
-test('drop one 3, average the rest, rounded', () => {
-  assert.equal(score([{ score: 4 }, { score: 3 }, { score: 3 }, { score: 3.2 }]), 3.4)
+test('rounded to 2 decimals', () => {
+  assert.equal(score([{ score: 4 }, { score: 3 }, { score: 3 }]), 3.33)
 })
 
 test('scaled to 4 points', () => {
-  assert.equal(score([{ score: 10, points: 10 }, { score: 2, points: 4 }]), 3)
+  assert.equal(score([{ score: 10, points: 10 }, { score: 5, points: 10 }]), 3)
 })
 
-// scoreFromDeductions — Attendance's present-student deduction scoring.
+test('a makeup raises the score in an even step (no cliff)', () => {
+  const before = score([{ score: 4 }, { score: 0 }, { score: 0 }, { score: 4 }])
+  const after = score([{ score: 4 }, { score: 3 }, { score: 0 }, { score: 4 }])
+  assert.deepEqual([before, after], [2, 2.75])
+})
+
 test('deductions: no marks is full marks', () => {
   assert.equal(scoreFromDeductions(0), 4)
 })

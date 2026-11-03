@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { X } from 'lucide-react'
 import Button from '../../components/Button.jsx'
 import TextField from '../../components/TextField.jsx'
 import FieldLabel from '../../components/FieldLabel.jsx'
@@ -10,11 +9,10 @@ import Skeleton from '../../components/Skeleton.jsx'
 import { useToast } from '../../components/Toast.jsx'
 import { usePinGate } from '../../security/usePinGate.jsx'
 import { getSections } from '../../api/sections.js'
-import { getModules } from '../../api/modules.js'
 import { deleteAssignment } from '../../api/assignments.js'
 import { NotFoundError } from '../../api/errors.js'
 import {
-  saveSectionDayType, saveCourseSettings, getTerms, saveTerm, deleteTerm,
+  saveSectionDayType, saveCourseSettings,
   getLabs, deleteLabsForCourse, resetCourseSetup, getCourseSetup,
 } from '../../storage/setup.js'
 
@@ -98,10 +96,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
 
   const [loading, setLoading]         = useState(true)
   const [sections, setSections]       = useState([])
-  const [modules, setModules]         = useState([])
-  const [terms, setTerms]             = useState([])
   const [pairings, setPairings]       = useState([])
-  const [newTermName, setNewTermName] = useState('')
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearChoice, setClearChoice]           = useState('keep')
@@ -114,11 +109,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   useEffect(() => {
     if (!courseId) return
     setLoading(true)
-    Promise.all([getSections(courseId), getModules(courseId), getTerms(courseId), getLabs(courseId)])
-      .then(([secs, mods, trms, pairs]) => {
+    Promise.all([getSections(courseId), getLabs(courseId)])
+      .then(([secs, pairs]) => {
         setSections(secs)
-        setModules(mods)
-        setTerms(trms)
         setPairings(pairs)
       })
       .finally(() => setLoading(false))
@@ -150,27 +143,6 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     const clamped = Number.isFinite(n) ? Math.min(4, Math.max(1, n)) : 4
     updateSettings({ maxScore: clamped })
     setMaxScoreInput(String(clamped))
-  }
-
-  async function handleCreateTerm() {
-    const trimmed = newTermName.trim()
-    if (!trimmed) return
-    const term = await saveTerm({ courseId, name: trimmed, moduleIds: [] })
-    setTerms(prev => [...prev, term])
-    setNewTermName('')
-  }
-
-  async function toggleTermModule(term, moduleId) {
-    const moduleIds = term.moduleIds.includes(moduleId)
-      ? term.moduleIds.filter(id => id !== moduleId)
-      : [...term.moduleIds, moduleId]
-    const updated = await saveTerm({ ...term, moduleIds })
-    setTerms(prev => prev.map(t => t.id === updated.id ? updated : t))
-  }
-
-  async function handleDeleteTerm(termId) {
-    await deleteTerm(termId)
-    setTerms(prev => prev.filter(t => t.id !== termId))
   }
 
   // Deletes each pairing's Canvas Professionalism assignment one at a time
@@ -327,55 +299,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-1">
             <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Terms</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Group Modules into a Term — the Scoring tab rolls each Term's Modules up into one score.
-            </p>
-
-            {terms.length > 0 && (
-              <div className="divide-y divide-[var(--color-border-subtle)]">
-                {terms.map(term => (
-                  <div key={term.id} className="py-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-[var(--color-text-body)]">{term.name}</span>
-                      <button
-                        onClick={() => handleDeleteTerm(term.id)}
-                        aria-label={`Delete ${term.name}`}
-                        className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {modules.map(mod => {
-                        const included = term.moduleIds.includes(mod.id)
-                        return (
-                          <button
-                            key={mod.id}
-                            onClick={() => toggleTermModule(term, mod.id)}
-                            aria-pressed={included}
-                            className={`px-2.5 py-1 rounded-full border text-xs transition-colors ${
-                              included
-                                ? 'border-[var(--cpt-color-text)] text-[var(--cpt-color-text)]'
-                                : 'border-[var(--color-border)] text-[var(--color-text-muted)]'
-                            }`}
-                          >
-                            {mod.name}
-                          </button>
-                        )
-                      })}
-                      {modules.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No modules found in this course.</p>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <TextField value={newTermName} onChange={setNewTermName} placeholder="Term 1" className="max-w-xs" onKeyDown={e => e.key === 'Enter' && handleCreateTerm()} />
-              <Button variant="secondary" size="sm" onClick={handleCreateTerm}>Add Term</Button>
-            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">Terms are set up in the Scoring tab, next to the scores they roll up.</p>
           </div>
 
           <div className="space-y-3 pt-4 border-t border-[var(--color-border)]">

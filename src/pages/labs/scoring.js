@@ -1,28 +1,20 @@
-// Professionalism-by-unit scoring — ported from the standalone
-// "professionalism-by-unit.html" tool's `Calc` object. The rules are
-// unchanged; only the input shape differs (live Canvas submissions instead
-// of parsed CSV cells).
+// Unit and Term professionalism scoring. Originally ported from the standalone
+// "professionalism-by-unit.html" tool; the rules changed on 2026-11-02 (see
+// DECISIONS.md) once at-home makeups made an absence zero a placeholder rather
+// than a final grade.
 //
-// Rules (unchanged from the original tool):
-//   - A graded score <= 0 on a lab counts as "missed."
-//   - If missed / counted >= 0.5 for a unit, the unit score is 0.
-//   - Otherwise each counted score is converted to a 4-point scale via
-//     (score / pointsPossible) * 4; with 3+ counted labs the single lowest
-//     is dropped; the rest are averaged and rounded to 2 decimals.
-//   - Ungraded/unsubmitted labs are "blank" and not counted, but flagged.
+// Rules:
+//   - Each graded lab is put on a 4-point scale via (score / pointsPossible) * 4.
+//   - The score is the plain average of every graded lab, rounded to 2 decimals.
+//     Nothing is dropped, and there is no automatic zero: an absence already
+//     scores 0, and a makeup replaces it.
+//   - A Term averages every lab in its Units directly, so each lab counts the
+//     same however the labs are split into Units.
+//   - Ungraded/unsubmitted labs are "blank": not counted, but noted.
 //   - Excused labs are not counted, and noted.
 //
-// One deliberate simplification vs. the CSV tool: the CSV version also
-// recognized free-text "N/A" and arbitrary non-numeric cells (since a human
-// could type anything into an exported spreadsheet). Canvas's API only ever
-// gives us a numeric score, null (ungraded/unsubmitted), or excused=true for
-// a points-based assignment, so those two extra states don't occur here —
-// both blank and "N/A-ish" collapse into the single "blank" state below.
-//
-// scoreStudent/scoreUnit are generic over "a list of scored items with an
-// id/name/pointsPossible and a submission lookup" — they're reused at both
-// the Unit level (items = labs) and the Term level (items = each unit's own
-// unit-score assignment) in ScoringPanel.jsx. Nothing here is lab-specific.
+// scoreStudent/scoreGroup are generic over "a list of labs with an
+// id/name/pointsPossible and a submission lookup". Nothing here touches Canvas.
 
 export const round2 = x => Math.round((x + Number.EPSILON) * 100) / 100
 export const fmt = x => String(round2(x))
@@ -40,6 +32,8 @@ export const isProfessionalismAssignment = name => PROFESSIONALISM_RE.test(name)
 // Term rollup in ScoringPanel.jsx, as opposed to isProfessionalismAssignment's
 // job of excluding them from lab rollup.
 export const isUnitScore = name => /\(unit score\)/i.test(name)
+// Either kind of score assignment this tool pushes to (Unit or Term).
+export const isScoreAssignment = name => SCORE_ASSIGNMENT_RE.test(name)
 
 const toFour = (score, points) => (points && points > 0 ? (score / points) * 4 : score)
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -74,7 +68,7 @@ export function scoreStudent(submissionsByAssignmentId, labs) {
     const c = readSubmission(submissionsByAssignmentId[lab.id])
     if (c.state === 'score') {
       if (c.value <= 0) missed++
-      pool.push({ value: c.value > 0 ? toFour(c.value, lab.pointsPossible) : 0, from: lab.name })
+      pool.push(c.value > 0 ? toFour(c.value, lab.pointsPossible) : 0)
     } else if (c.state === 'blank') {
       notes.push(`${lab.name} is blank and wasn't counted`)
     } else if (c.state === 'excused') {
@@ -83,48 +77,25 @@ export function scoreStudent(submissionsByAssignmentId, labs) {
   }
 
   const counted = pool.length
-  const base = { missed, counted, dropped: null, zero: false }
-  if (counted === 0) return { ...base, value: null, notes: ['No lab scores in this unit yet', ...notes] }
-  if (missed) notes.unshift(`Missed ${missed} of ${plural(counted, 'lab')}`)
-  if (missed / counted >= 0.5) return { ...base, value: 0, zero: true, notes }
-
-  let dropped = null
-  if (pool.length >= 3) {
-    let low = 0
-    pool.forEach((p, i) => { if (p.value < pool[low].value) low = i })
-    dropped = pool.splice(low, 1)[0]
-    notes.push(`Dropped ${fmt(dropped.value)} from ${dropped.from}`)
-  }
-  const avg = pool.reduce((a, p) => a + p.value, 0) / pool.length
-  return { ...base, value: round2(avg), dropped, notes }
+  if (counted === 0) return { value: null, missed, counted, notes: ['No lab scores yet', ...notes] }
+  if (missed) notes.unshift(`${missed} of ${plural(counted, 'lab')} scored 0`)
+  const avg = pool.reduce((a, v) => a + v, 0) / counted
+  return { value: round2(avg), missed, counted, notes }
 }
 
-// Distinct unit names, in the order labs were first assigned to them.
-// assign: { [assignmentId]: unitName }
-export function units(labs, assign) {
-  const out = []
-  for (const lab of labs) {
-    const u = (assign[lab.id] || '').trim()
-    if (u && !out.includes(u)) out.push(u)
-  }
-  return out
-}
-
-// students: [{ userId, userName, sectionName }]
+// students: [{ userId, ... }]; labs: the group's labs.
 // submissionsByStudent: { [userId]: { [assignmentId]: { score, excused } } }
-export function scoreUnit(students, labs, assign, unit, submissionsByStudent) {
-  const unitLabs = labs.filter(l => (assign[l.id] || '').trim() === unit)
-  const results = students.map(s => scoreStudent(submissionsByStudent[s.userId] ?? {}, unitLabs))
-  return { unit, labs: unitLabs, results }
+export function scoreGroup(students, labs, submissionsByStudent) {
+  return students.map(s => scoreStudent(submissionsByStudent[s.userId] ?? {}, labs))
 }
 
 // Fallback "copy as spreadsheet column" export (students in the same order
-// passed to scoreUnit).
-export function columnText(students, scored, title, withHeader) {
+// passed to scoreGroup).
+export function columnText(students, results, title, withHeader) {
   const lines = []
   if (withHeader) lines.push(title)
   students.forEach((s, i) => {
-    const r = scored.results[i]
+    const r = results[i]
     lines.push(r && r.value !== null ? String(r.value) : '')
   })
   return lines.join('\n')

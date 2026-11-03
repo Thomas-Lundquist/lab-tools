@@ -24,7 +24,7 @@ import { AuthError } from '../api/errors.js'
 import { merge3, deepEqual } from './merge.js'
 
 export const isSyncedKey = key =>
-  key === 'preferences' || key === 'setup' || key.startsWith('labGrading/') || key.startsWith('kitchens/')
+  key === 'preferences' || key === 'setup' || key.startsWith('labGrading/') || key.startsWith('kitchens/') || key.startsWith('rollups/')
 
 const baseKey = key => `sync:base:${key}`
 const DIRTY_KEY = 'sync:dirty'
