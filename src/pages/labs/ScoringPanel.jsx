@@ -34,7 +34,6 @@ const norm = s => (s ?? '').trim().toLowerCase()
 const toMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
 
 export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
-  const toast = useToast()
   const [assignments, setAssignments]   = useState([])
   const [students, setStudents]         = useState([])
   const [sections, setSections]         = useState([])
@@ -45,6 +44,8 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
   const [courseSetup, setCourseSetup]   = useState(null)
   const [rollups, setRollups]           = useState({})
   const [loading, setLoading]           = useState(false)
+  const [loadError, setLoadError]       = useState(null)
+  const [reloadTick, setReloadTick]     = useState(0)
 
   useEffect(() => {
     if (!courseId) {
@@ -54,6 +55,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
     }
     let cancelled = false
     setLoading(true)
+    setLoadError(null)
     ;(async () => {
       try {
         const [asns, secs, enrollments, mods, entryList, termList, setup, roll] = await Promise.all([
@@ -66,8 +68,11 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
           getCourseSetup(courseId),
           getRollups(courseId),
         ])
-        // Submissions only for the labs and the Unit/Term score assignments.
-        const relevantIds = asns.filter(a => isProfessionalismAssignment(a.name) || isScoreAssignment(a.name)).map(a => a.id)
+        // Submissions only for the labs and the Unit/Term score assignments, and
+        // only published ones: Canvas refuses the whole request ("invalid
+        // assignment ids", 403) if any id in it is unpublished. Unpublished
+        // assignments can't hold grades anyway.
+        const relevantIds = asns.filter(a => a.published && (isProfessionalismAssignment(a.name) || isScoreAssignment(a.name))).map(a => a.id)
         const subs = relevantIds.length ? await getCourseSubmissions(courseId, relevantIds) : []
         if (cancelled) return
 
@@ -95,20 +100,20 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
         setCourseSetup(setup)
         setRollups(roll)
       } catch (err) {
-        if (!cancelled) toast(`Could not load scoring data: ${err.message}`, 'error')
+        if (!cancelled) setLoadError(err.message)
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
     return () => { cancelled = true }
-  }, [courseId])
+  }, [courseId, reloadTick])
 
   // Each lab is a professionalism assignment; its Unit is the Module chosen for
   // it in the Professionalism tab. Labs with no Module (or not tracked) can't
   // be rolled up and are called out instead.
   const entryByAssignment = useMemo(() => Object.fromEntries(entries.map(e => [e.professionalismAssignmentId, e])), [entries])
   const labs = useMemo(() => assignments
-    .filter(a => isProfessionalismAssignment(a.name))
+    .filter(a => a.published && isProfessionalismAssignment(a.name))
     .map(a => ({ id: a.id, name: a.name, pointsPossible: a.pointsPossible, entry: entryByAssignment[a.id] ?? null, moduleId: entryByAssignment[a.id]?.moduleId ?? null })),
   [assignments, entryByAssignment])
   const unassignedLabs = labs.filter(l => !l.moduleId || !modules.some(m => m.id === l.moduleId))
@@ -144,6 +149,9 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
     return <div className="space-y-3"><Skeleton height="1.5rem" width="16rem" /><Skeleton height="8rem" /></div>
   }
   if (!courseId) return <EmptyState title="Select a course" body="Choose a course above to score Professionalism assignments." />
+  if (loadError) {
+    return <EmptyState title="Couldn't load scores" body={loadError} actions={<Button onClick={() => setReloadTick(t => t + 1)}>Try again</Button>} />
+  }
   if (!labs.length) {
     return (
       <EmptyState
