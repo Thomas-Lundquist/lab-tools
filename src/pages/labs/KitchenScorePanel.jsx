@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
-import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus, Undo2, XCircle } from 'lucide-react'
+import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus, Undo2, XCircle, X } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Select from '../../components/Select.jsx'
@@ -947,22 +947,19 @@ export function fmtDateRange(dates) {
   return `${month(first)} ${first.getDate()}–${month(last)} ${last.getDate()}`
 }
 
-// Present / Absent as a block slider, in the app's Bauhaus style: a square-cornered
-// bar with the heavy border, solid green ("PRESENT") or red ("ABSENT"), and a
-// solid block that sits at one end and slides across on tap. Only the current
-// state's word shows.
+// Present / Absent as a stamp, in the app's Bauhaus style: a solid square-cornered
+// block with the heavy border, green with a circle and "PRESENT", or red with a
+// cross and "ABSENT". Tap to flip. Fixed width, so the row doesn't shift.
 function AttendanceSwitch({ absent, name, onToggle }) {
   return (
     <button type="button" role="switch" aria-checked={!absent} onClick={onToggle}
       aria-label={`${name}: ${absent ? 'absent' : 'present'}. Tap to mark ${absent ? 'present' : 'absent'}.`}
-      className={`relative shrink-0 w-[7rem] h-8 overflow-hidden rounded-[var(--radius-control)] border-2 border-[var(--color-border-strong)] transition-colors duration-150 ${
+      className={`shrink-0 w-[6.5rem] h-8 inline-flex items-center gap-2 pl-2.5 pr-2 rounded-[var(--radius-control)] border-2 border-[var(--color-border-strong)] text-white transition-colors duration-100 ${
         absent ? 'bg-[var(--color-danger-fill)]' : 'bg-[var(--color-success-fill)]'}`}>
-      <span aria-hidden="true"
-        className={`absolute inset-y-0 w-7 bg-[var(--color-border-strong)] transition-[left] duration-150 ${absent ? 'left-0' : 'left-[calc(100%-1.75rem)]'}`} />
-      <span className={`absolute inset-y-0 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-white ${
-        absent ? 'left-7 right-0' : 'left-0 right-7'}`}>
-        {absent ? 'Absent' : 'Present'}
-      </span>
+      {absent
+        ? <X size={14} strokeWidth={3.5} aria-hidden="true" className="shrink-0" />
+        : <span aria-hidden="true" className="shrink-0 w-3 h-3 m-px rounded-full bg-white" />}
+      <span className="text-xs font-bold uppercase tracking-wider">{absent ? 'Absent' : 'Present'}</span>
     </button>
   )
 }
