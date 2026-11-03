@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS = {
 const DEFAULT_COURSE = {
   enabled: false,
   professionalismGroupId: null,
-  sections: {},                 // sectionId -> { dayType: 'A' | 'B' }
+  sections: {},                 // sectionId -> { dayType: 'A' | 'B', excludedStudentIds: [] }
   settings: DEFAULT_SETTINGS,
 }
 
@@ -77,7 +77,16 @@ export async function saveCourseSetup(courseId, patch) {
 
 export async function saveSectionDayType(courseId, sectionId, dayType) {
   const course = await getCourseSetup(courseId)
-  const sections = { ...course.sections, [sectionId]: { dayType } }
+  const sections = { ...course.sections, [sectionId]: { ...course.sections[sectionId], dayType } }
+  return saveCourseSetup(courseId, { sections })
+}
+
+// Students Canvas mistakenly enrolled in this section alongside their real
+// one. Excluded from this section's roster everywhere it's built (the Lab
+// tab, the Unit/Term rollup) so they're graded only under their real section.
+export async function saveSectionExclusions(courseId, sectionId, excludedStudentIds) {
+  const course = await getCourseSetup(courseId)
+  const sections = { ...course.sections, [sectionId]: { ...course.sections[sectionId], excludedStudentIds } }
   return saveCourseSetup(courseId, { sections })
 }
 

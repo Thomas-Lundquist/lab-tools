@@ -8,11 +8,14 @@ import Callout from '../../components/Callout.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import { useToast } from '../../components/Toast.jsx'
 import { usePinGate } from '../../security/usePinGate.jsx'
+import Select from '../../components/Select.jsx'
+import Chip from '../../components/Chip.jsx'
 import { getSections } from '../../api/sections.js'
+import { getEnrollments } from '../../api/enrollments.js'
 import { deleteAssignment } from '../../api/assignments.js'
 import { NotFoundError } from '../../api/errors.js'
 import {
-  saveSectionDayType, saveCourseSettings,
+  saveSectionDayType, saveSectionExclusions, saveCourseSettings,
   getLabs, deleteLabsForCourse, resetCourseSetup, getCourseSetup,
 } from '../../storage/setup.js'
 
@@ -97,6 +100,8 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   const [loading, setLoading]         = useState(true)
   const [sections, setSections]       = useState([])
   const [pairings, setPairings]       = useState([])
+  const [studentNames, setStudentNames] = useState({}) // userId -> name, for exclusion pickers
+  const [addExcludeSection, setAddExcludeSection] = useState(null) // sectionId whose "add" picker is open
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearChoice, setClearChoice]           = useState('keep')
@@ -109,10 +114,11 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   useEffect(() => {
     if (!courseId) return
     setLoading(true)
-    Promise.all([getSections(courseId), getLabs(courseId)])
-      .then(([secs, pairs]) => {
+    Promise.all([getSections(courseId), getLabs(courseId), getEnrollments(courseId)])
+      .then(([secs, pairs, enrollments]) => {
         setSections(secs)
         setPairings(pairs)
+        setStudentNames(Object.fromEntries(enrollments.map(e => [e.userId, e.userName ?? e.userId])))
       })
       .finally(() => setLoading(false))
   }, [courseId])
@@ -131,6 +137,22 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
 
   async function handleDayType(sectionId, dayType) {
     const updated = await saveSectionDayType(courseId, sectionId, dayType)
+    onSetupChange?.(updated)
+    onChanged?.()
+  }
+
+  async function handleExcludeStudent(sectionId, studentId) {
+    const current = setup.sections[sectionId]?.excludedStudentIds ?? []
+    if (current.includes(studentId)) return
+    const updated = await saveSectionExclusions(courseId, sectionId, [...current, studentId])
+    onSetupChange?.(updated)
+    onChanged?.()
+    setAddExcludeSection(null)
+  }
+
+  async function handleUnexcludeStudent(sectionId, studentId) {
+    const current = setup.sections[sectionId]?.excludedStudentIds ?? []
+    const updated = await saveSectionExclusions(courseId, sectionId, current.filter(id => id !== studentId))
     onSetupChange?.(updated)
     onChanged?.()
   }
@@ -218,24 +240,70 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
             <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Periods — A day / B day</h3>
             <p className="text-xs text-[var(--color-text-muted)]">Sets which lab date (A day or B day) each period gets when you create a lab.</p>
             <div className="divide-y divide-[var(--color-border-subtle)]">
-              {sections.map(sec => (
-                <div key={sec.id} className="flex items-center justify-between py-2">
-                  <span className="text-sm text-[var(--color-text-body)]">{sec.name}</span>
-                  <div className="segmented-control">
-                    {['A', 'B'].map(day => (
-                      <button
-                        key={day}
-                        aria-pressed={setup.sections[sec.id]?.dayType === day}
-                        onClick={() => handleDayType(sec.id, day)}
-                      >
-                        {day} day
-                      </button>
-                    ))}
+              {sections.map(sec => {
+                const secSetup = setup.sections[sec.id] ?? {}
+                const excludedIds = secSetup.excludedStudentIds ?? []
+                const pickableIds = sec.studentIds.filter(id => !excludedIds.includes(id))
+                const addingHere = addExcludeSection === sec.id
+                return (
+                  <div key={sec.id} className="py-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-[var(--color-text-body)]">{sec.name}</span>
+                      <div className="segmented-control">
+                        {['A', 'B'].map(day => (
+                          <button
+                            key={day}
+                            aria-pressed={secSetup.dayType === day}
+                            onClick={() => handleDayType(sec.id, day)}
+                          >
+                            {day} day
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {excludedIds.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-[var(--color-text-muted)]">Excluded (wrongly enrolled):</span>
+                        {excludedIds.map(id => (
+                          <Chip
+                            key={id}
+                            active
+                            tone="critical"
+                            title="Remove exclusion — this student will be graded with this period again"
+                            onClick={() => handleUnexcludeStudent(sec.id, id)}
+                          >
+                            {studentNames[id] ?? id} ×
+                          </Chip>
+                        ))}
+                      </div>
+                    )}
+                    {addingHere ? (
+                      <div className="flex items-center gap-2">
+                        <Select
+                          className="w-56"
+                          value=""
+                          placeholder={pickableIds.length ? 'Choose a student…' : 'No students left to exclude'}
+                          disabled={!pickableIds.length}
+                          onChange={id => id && handleExcludeStudent(sec.id, id)}
+                          options={pickableIds.map(id => ({ value: id, label: studentNames[id] ?? id }))}
+                        />
+                        <Button variant="ghost" size="sm" onClick={() => setAddExcludeSection(null)}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <Button variant="ghost" size="sm" onClick={() => setAddExcludeSection(sec.id)}>
+                        Exclude a mistakenly-enrolled student…
+                      </Button>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
               {sections.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-2">No periods found.</p>}
             </div>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Use this when Canvas has enrolled a student in this period alongside their real one — excluding them
+              here hides them from this period's roster everywhere (Lab tab, Unit/Term rollup) without touching
+              their enrollment in Canvas.
+            </p>
           </div>
 
           <div className="space-y-4">

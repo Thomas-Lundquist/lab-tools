@@ -137,8 +137,9 @@ export default function KitchenScorePanel({
         if (cancelled) return
         const sec = sections.find(s => s.id === sectionId)
         const idsInSection = new Set(sec?.studentIds ?? [])
+        const excludedIds = new Set(courseSetup?.sections?.[sectionId]?.excludedStudentIds ?? [])
         const inSection = enrollments
-          .filter(e => idsInSection.has(e.userId))
+          .filter(e => idsInSection.has(e.userId) && !excludedIds.has(e.userId))
           .sort((a, b) => (a.userSortableName ?? '').localeCompare(b.userSortableName ?? ''))
         const r = inSection.map(e => ({ userId: e.userId, userName: e.userName }))
         const state = profStateFrom(profSubs)
@@ -158,7 +159,7 @@ export default function KitchenScorePanel({
       .finally(() => { if (!cancelled) setRosterLoading(false) })
     return () => { cancelled = true }
   // entries (read only for the one-time seed) loads alongside sections, so it's covered.
-  }, [entry, sectionId, courseId, sections, labId, reloadTick])
+  }, [entry, sectionId, courseId, sections, courseSetup, labId, reloadTick])
 
   // --- period status: which periods of this lab are committed / have drafts ---
   useEffect(() => {

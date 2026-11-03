@@ -104,7 +104,13 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
         if (cancelled) return
 
         const sectionByStudent = {}
-        for (const sec of secs) for (const sid of sec.studentIds) sectionByStudent[sid] = sec
+        for (const sec of secs) {
+          const excludedIds = new Set(setup.sections?.[sec.id]?.excludedStudentIds ?? [])
+          for (const sid of sec.studentIds) {
+            if (excludedIds.has(sid)) continue
+            sectionByStudent[sid] = sec
+          }
+        }
         const byUser = new Map()
         for (const e of enrollments) {
           if (!byUser.has(e.userId)) {
