@@ -25,7 +25,9 @@ export async function getAssignmentSubmissions(courseId, assignmentId, { include
 // assignmentIds to scope it to just those assignments — far fewer pages than
 // pulling every assignment's submissions, which matters on a real course.
 export async function getCourseSubmissions(courseId, assignmentIds) {
-  const params = { student_ids: ['all'], include: ['assignment'] }
+  // No include[]=assignment: it repeats the whole assignment on every
+  // submission and made each page several times larger. assignment_id is enough.
+  const params = { student_ids: ['all'] }
   if (assignmentIds?.length) params.assignment_ids = assignmentIds
   const subs = await canvasGetAll(
     `/api/v1/courses/${courseId}/students/submissions`,

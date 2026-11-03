@@ -13,7 +13,7 @@ import ChangedInCanvas from '../../components/ChangedInCanvas.jsx'
 import { useToast } from '../../components/Toast.jsx'
 import { usePinGate } from '../../security/usePinGate.jsx'
 import { getAssignments, createAssignment } from '../../api/assignments.js'
-import { getCourseSubmissions, getAssignmentSubmissions } from '../../api/submissions.js'
+import { getAssignmentSubmissions } from '../../api/submissions.js'
 import { getSections } from '../../api/sections.js'
 import { getEnrollments } from '../../api/enrollments.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
@@ -31,6 +31,20 @@ import { planPush, groupStatus, planPushRevert, runPush, runPushRevert, postedAf
 const UNIT_SUFFIX = 'Professionalism (Unit Score)'
 const TERM_SUFFIX = 'Professionalism (Term Score)'
 const norm = s => (s ?? '').trim().toLowerCase()
+// Runs fn over items with at most `limit` in flight, keeping order.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}
+
 const toMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
 
 export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
@@ -73,7 +87,11 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse }) {
         // assignment ids", 403) if any id in it is unpublished. Unpublished
         // assignments can't hold grades anyway.
         const relevantIds = asns.filter(a => a.published && (isProfessionalismAssignment(a.name) || isScoreAssignment(a.name))).map(a => a.id)
-        const subs = relevantIds.length ? await getCourseSubmissions(courseId, relevantIds) : []
+        // One request per assignment, six at a time. The course-wide endpoint
+        // pages through every submission one page after another, which took
+        // most of a minute on a real course.
+        const subs = (await mapLimit(relevantIds, 6, id => getAssignmentSubmissions(courseId, id)
+          .then(list => list.map(s => ({ ...s, assignmentId: id }))))).flat()
         if (cancelled) return
 
         const sectionByStudent = {}
