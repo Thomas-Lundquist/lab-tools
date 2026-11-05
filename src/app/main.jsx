@@ -12,6 +12,7 @@ import { useRoute } from '../utils/nav.js'
 import Home from '../shell/index.jsx'
 import { TOOLS } from '../config/tools.jsx'
 import LabsPage from '../pages/labs/index.jsx'
+import RotationPage from '../pages/rotation/index.jsx'
 import Settings from '../settings/index.jsx'
 import Onboarding from '../pages/onboarding/App.jsx'
 import DebugReport from '../debug/DebugReport.jsx'
@@ -24,7 +25,7 @@ import { installDiagnostics } from '../debug/diagnostics.js'
 // Each tool used to be its own HTML page — see utils/nav.js for why it's one
 // page with in-app routes now.
 
-const PAGES = { home: Home, labs: LabsPage, settings: Settings, debug: DebugReport }
+const PAGES = { home: Home, labs: LabsPage, rotation: RotationPage, settings: Settings, debug: DebugReport }
 // With a single tool, "home" is that tool: a launcher page with one tile only
 // cost a tap on every launch. Home comes back on its own if a second tool is added.
 if (TOOLS.length === 1) PAGES.home = LabsPage

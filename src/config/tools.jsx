@@ -1,4 +1,4 @@
-import { CalendarCheck } from 'lucide-react'
+import { CalendarCheck, ChefHat } from 'lucide-react'
 
 // Single source of truth for all tool pages.
 // AppNav, settings, and the home page all read from here.
@@ -13,6 +13,7 @@ import { CalendarCheck } from 'lucide-react'
 
 export const MODULES = [
   { id: 'grading', label: 'Grading' },
+  { id: 'classroom', label: 'Classroom' },
 ]
 
 export const TOOLS = [
@@ -24,5 +25,14 @@ export const TOOLS = [
     description: 'Create Professionalism assignments (paired with a lab journal, or standalone), take attendance, score students, and roll scores up by Unit and Term back to the gradebook.',
     Icon:        CalendarCheck,
     route:       'labs',
+  },
+  {
+    id:          'rotation',
+    module:      'classroom',
+    label:       'Kitchen Rotation',
+    shortLabel:  'Rotation',
+    description: 'Seat each class in the eight kitchens from its Canvas roster, rotate students through job titles, share out extra duties and center-sink turns, and show the board full screen.',
+    Icon:        ChefHat,
+    route:       'rotation',
   },
 ]
