@@ -9,15 +9,22 @@ import Skeleton from '../../components/Skeleton.jsx'
 import { useToast } from '../../components/Toast.jsx'
 import { usePinGate } from '../../security/usePinGate.jsx'
 import Select from '../../components/Select.jsx'
-import Chip from '../../components/Chip.jsx'
 import { getSections } from '../../api/sections.js'
 import { getEnrollments } from '../../api/enrollments.js'
 import { deleteAssignment } from '../../api/assignments.js'
 import { NotFoundError } from '../../api/errors.js'
 import {
   saveSectionDayType, saveSectionExclusions, saveCourseSettings,
-  getLabs, deleteLabsForCourse, resetCourseSetup, getCourseSetup,
+  getLabs, deleteLabsForCourse, resetCourseSetup, getCourseSetup, getTemplates,
 } from '../../storage/setup.js'
+import { getAllStandingKitchens, saveStandingKitchen } from '../../storage/kitchens.js'
+import { findDuplicateEnrollments } from './duplicateEnrollments.js'
+
+// Always offer at least this many; a period that already placed someone in a
+// higher kitchen (e.g. a big section) shows that many instead. Mirrors
+// KitchenScorePanel's KITCHEN_COUNT/highestKitchen — the usual-kitchens editor
+// should never offer fewer slots than grading itself does.
+const KITCHEN_COUNT = 8
 
 // Confirms "Clear setup" — a two-way choice (preserve pairings vs. also
 // permanently delete their Canvas Professionalism assignments) plus an
@@ -101,7 +108,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   const [sections, setSections]       = useState([])
   const [pairings, setPairings]       = useState([])
   const [studentNames, setStudentNames] = useState({}) // userId -> name, for exclusion pickers
-  const [addExcludeSection, setAddExcludeSection] = useState(null) // sectionId whose "add" picker is open
+  const [standing, setStanding]         = useState({}) // sectionId -> { students: { [studentId]: kitchenNo } }
+  const [kitchenSection, setKitchenSection] = useState(null) // sectionId whose usual-kitchens editor is open
+  const [templates, setTemplates]       = useState([])
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearChoice, setClearChoice]           = useState('keep')
@@ -114,11 +123,20 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
   useEffect(() => {
     if (!courseId) return
     setLoading(true)
-    Promise.all([getSections(courseId), getLabs(courseId), getEnrollments(courseId)])
-      .then(([secs, pairs, enrollments]) => {
-        setSections(secs)
+    Promise.all([getSections(courseId), getLabs(courseId), getEnrollments(courseId), getAllStandingKitchens(courseId), getTemplates()])
+      .then(([secs, pairs, enrollments, standingKitchens, tmpls]) => {
+        // Canvas's sections include=students can list ids with no active
+        // StudentEnrollment (an observer linked to the section, an invited-but-
+        // not-accepted seat, a concluded enrollment) — the Lab tab roster already
+        // cross-checks against active enrollments and drops these; do the same
+        // here so they never show up as a nameless id in the exclude/duplicate/
+        // kitchen pickers.
+        const enrolledIds = new Set(enrollments.map(e => e.userId))
+        setSections(secs.map(s => ({ ...s, studentIds: s.studentIds.filter(id => enrolledIds.has(id)) })))
         setPairings(pairs)
         setStudentNames(Object.fromEntries(enrollments.map(e => [e.userId, e.userName ?? e.userId])))
+        setStanding(standingKitchens)
+        setTemplates(tmpls)
       })
       .finally(() => setLoading(false))
   }, [courseId])
@@ -147,7 +165,6 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     const updated = await saveSectionExclusions(courseId, sectionId, [...current, studentId])
     onSetupChange?.(updated)
     onChanged?.()
-    setAddExcludeSection(null)
   }
 
   async function handleUnexcludeStudent(sectionId, studentId) {
@@ -155,6 +172,15 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     const updated = await saveSectionExclusions(courseId, sectionId, current.filter(id => id !== studentId))
     onSetupChange?.(updated)
     onChanged?.()
+  }
+
+  // Sets a student's usual kitchen directly, the same starting point a lab
+  // seeds from — it does not touch any lab already graded. A new, unstarted
+  // lab for this period picks this up the next time its roster loads.
+  async function handleSetStandingKitchen(sectionId, studentId, kitchenStr) {
+    const kitchen = kitchenStr === '' ? null : Number(kitchenStr)
+    const updated = await saveStandingKitchen(courseId, sectionId, studentId, kitchen)
+    setStanding(prev => ({ ...prev, [sectionId]: updated }))
   }
 
   // Clamp to a sane range on blur. 1 is the lowest non-absent tier, so a top
@@ -221,6 +247,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
     )
   }
 
+  const excludedBySection = Object.fromEntries(sections.map(s => [s.id, setup?.sections?.[s.id]?.excludedStudentIds ?? []]))
+  const duplicates = findDuplicateEnrollments(sections, excludedBySection)
+
   return (
     <>
     <Modal
@@ -237,6 +266,37 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
       ) : (
         <div className="space-y-6">
           <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Possible duplicate enrollments</h3>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Canvas has these students enrolled in more than one period. Check the period(s) where they should
+              actually be graded — uncheck the rest.
+            </p>
+            {duplicates.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)]">None found — every student is in exactly one period.</p>
+            ) : (
+              <div className="space-y-2">
+                {duplicates.map(d => (
+                  <div key={d.studentId} className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                    <span className="text-sm text-[var(--color-text-body)] font-medium min-w-[8rem]">
+                      {studentNames[d.studentId] ?? d.studentId}
+                    </span>
+                    {d.sectionIds.map(id => (
+                      <label key={id} className="flex items-center gap-1.5 text-sm text-[var(--color-text-body)]">
+                        <input
+                          type="checkbox"
+                          checked={d.activeSectionIds.includes(id)}
+                          onChange={e => (e.target.checked ? handleUnexcludeStudent : handleExcludeStudent)(id, d.studentId)}
+                        />
+                        {sections.find(s => s.id === id)?.name ?? id}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
             <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Periods — A day / B day</h3>
             <p className="text-xs text-[var(--color-text-muted)]">Sets which lab date (A day or B day) each period gets when you create a lab.</p>
             <div className="divide-y divide-[var(--color-border-subtle)]">
@@ -244,7 +304,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                 const secSetup = setup.sections[sec.id] ?? {}
                 const excludedIds = secSetup.excludedStudentIds ?? []
                 const pickableIds = sec.studentIds.filter(id => !excludedIds.includes(id))
-                const addingHere = addExcludeSection === sec.id
+                const standingStudents = standing[sec.id]?.students ?? {}
+                const sectionKitchenCount = Math.max(KITCHEN_COUNT, ...Object.values(standingStudents))
+                const editingKitchens = kitchenSection === sec.id
                 return (
                   <div key={sec.id} className="py-2 space-y-2">
                     <div className="flex items-center justify-between">
@@ -261,37 +323,34 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                         ))}
                       </div>
                     </div>
-                    {excludedIds.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs text-[var(--color-text-muted)]">Excluded (wrongly enrolled):</span>
-                        {excludedIds.map(id => (
-                          <Chip
-                            key={id}
-                            active
-                            tone="critical"
-                            title="Remove exclusion — this student will be graded with this period again"
-                            onClick={() => handleUnexcludeStudent(sec.id, id)}
-                          >
-                            {studentNames[id] ?? id} ×
-                          </Chip>
-                        ))}
-                      </div>
-                    )}
-                    {addingHere ? (
-                      <div className="flex items-center gap-2">
-                        <Select
-                          className="w-56"
-                          value=""
-                          placeholder={pickableIds.length ? 'Choose a student…' : 'No students left to exclude'}
-                          disabled={!pickableIds.length}
-                          onChange={id => id && handleExcludeStudent(sec.id, id)}
-                          options={pickableIds.map(id => ({ value: id, label: studentNames[id] ?? id }))}
-                        />
-                        <Button variant="ghost" size="sm" onClick={() => setAddExcludeSection(null)}>Cancel</Button>
+                    {editingKitchens ? (
+                      <div className="rounded-[var(--radius-control)] bg-[var(--color-bg-hover)] p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-[var(--color-text-body)]">Usual kitchen for each student</span>
+                          <Button variant="ghost" size="sm" onClick={() => setKitchenSection(null)}>Close</Button>
+                        </div>
+                        <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                          {pickableIds.map(id => (
+                            <div key={id} className="flex items-center justify-between gap-3">
+                              <span className="text-sm text-[var(--color-text-body)] truncate">{studentNames[id] ?? id}</span>
+                              <Select
+                                className="w-28 shrink-0"
+                                aria-label={`${studentNames[id] ?? id}'s usual kitchen`}
+                                value={standingStudents[id] != null ? String(standingStudents[id]) : ''}
+                                onChange={v => handleSetStandingKitchen(sec.id, id, v)}
+                                options={[
+                                  { value: '', label: 'No kitchen' },
+                                  ...Array.from({ length: sectionKitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
+                                ]}
+                              />
+                            </div>
+                          ))}
+                          {pickableIds.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No students in this period.</p>}
+                        </div>
                       </div>
                     ) : (
-                      <Button variant="ghost" size="sm" onClick={() => setAddExcludeSection(sec.id)}>
-                        Exclude a mistakenly-enrolled student…
+                      <Button variant="ghost" size="sm" onClick={() => setKitchenSection(sec.id)}>
+                        Set usual kitchens…
                       </Button>
                     )}
                   </div>
@@ -300,9 +359,9 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
               {sections.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-2">No periods found.</p>}
             </div>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Use this when Canvas has enrolled a student in this period alongside their real one — excluding them
-              here hides them from this period's roster everywhere (Lab tab, Unit/Term rollup) without touching
-              their enrollment in Canvas.
+              Unchecking a period above hides that student from its roster everywhere (Lab tab, Unit/Term rollup)
+              without touching their enrollment in Canvas. "Usual kitchens" sets where each student starts on a lab
+              that hasn't been graded yet — moving someone during grading still updates it, the same as before.
             </p>
           </div>
 
@@ -324,6 +383,20 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
               <span>Send a flag summary to students as a submission comment</span>
               <input type="checkbox" checked={setup.settings.sendDeductionReasonsAsComment} onChange={e => updateSettings({ sendDeductionReasonsAsComment: e.target.checked })} />
             </label>
+            <div>
+              <FieldLabel htmlFor="profTemplate">Professionalism template</FieldLabel>
+              <Select
+                id="profTemplate"
+                value={setup.settings.professionalismTemplateId ?? ''}
+                onChange={v => updateSettings({ professionalismTemplateId: v || null })}
+                className="max-w-xs"
+                options={[{ value: '', label: 'No template' }, ...templates.map(t => ({ value: t.id, label: t.name }))]}
+              />
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Deployed into a new Professionalism assignment's description when it's created — the Create form
+                can still override this for one assignment. Manage templates in Settings › Professionalism templates.
+              </p>
+            </div>
             <label className="flex items-center justify-between gap-3 text-sm">
               <span>Journal due date — days after the lab date</span>
               <TextField

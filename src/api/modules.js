@@ -1,4 +1,4 @@
-import { canvasGetAll, canvasPost } from './request.js'
+import { canvasGetAll, canvasPost, canvasDelete } from './request.js'
 
 export async function getModules(courseId) {
   const modules = await canvasGetAll(`/api/v1/courses/${courseId}/modules`)
@@ -34,6 +34,14 @@ export async function ensureModuleItem(courseId, moduleId, assignmentId) {
   const already = items.some(i => i.type === 'Assignment' && i.contentId === assignmentId)
   if (already) return null
   return addModuleItem(courseId, moduleId, assignmentId)
+}
+
+// Removes an item from a module (the assignment itself is untouched — this
+// only un-links it from this module, e.g. when the editor moves it to
+// another one). A moved assignment calls this on its old module, then
+// ensureModuleItem on the new one.
+export async function deleteModuleItem(courseId, moduleId, itemId) {
+  await canvasDelete(`/api/v1/courses/${courseId}/modules/${moduleId}/items/${itemId}`)
 }
 
 function mapModule(raw) {

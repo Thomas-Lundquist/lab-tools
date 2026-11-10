@@ -18,10 +18,17 @@ export async function getStandingKitchens(courseId, sectionId) {
   return (await kvGet(courseKey(courseId)))?.[sectionId] ?? null
 }
 
+// Every period's standing kitchens for a course, for the Course Settings editor.
+export async function getAllStandingKitchens(courseId) {
+  return (await kvGet(courseKey(courseId))) ?? {}
+}
+
 async function updatePeriod(courseId, sectionId, update) {
   const all = (await kvGet(courseKey(courseId))) ?? {}
   const prev = all[sectionId] ?? { students: {} }
-  await kvSet(courseKey(courseId), { ...all, [sectionId]: update(prev) })
+  const next = update(prev)
+  await kvSet(courseKey(courseId), { ...all, [sectionId]: next })
+  return next
 }
 
 export function saveStandingKitchen(courseId, sectionId, studentId, kitchen) {

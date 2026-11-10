@@ -64,7 +64,6 @@ export default function KitchenScorePanel({
   const [section, setSection]         = useState(emptySection())
   const [standing, setStanding]       = useState(null) // this period's usual kitchens (storage/kitchens.js)
 
-  const [pendingDraft, setPendingDraft] = useState(null) // the stored state when an unsaved draft exists
   const [confirming, setConfirming]   = useState(false)
   const [preview, setPreview]         = useState(null) // { plan, canvas } | { error } while confirming
   const [overwrite, setOverwrite]     = useState(() => new Set()) // students changed in Canvas to overwrite anyway
@@ -120,7 +119,6 @@ export default function KitchenScorePanel({
   // --- roster + current scores + stored flags for the chosen lab/section ---
   useEffect(() => {
     clearTimeout(autosaveTimer.current)
-    setPendingDraft(null)
     setLoadError(null)
     if (!entry || !sectionId) { setRoster([]); setProfScores({}); setProfState({}); setStored(null); setStanding(null); setSection(emptySection()); return }
     // A slower response for a period the teacher already left must not land on
@@ -148,12 +146,14 @@ export default function KitchenScorePanel({
         setProfState(state)
         setStored(storedState)
         setStanding(standingKitchens)
-        // Baseline from the committed set; a draft, if any, is offered via prompt.
-        // Students the lab hasn't placed yet start in their usual kitchen.
-        setSection(buildSection(r, storedState.committed, state, standingKitchens))
-        if (isUnsavedDraft(storedState)) setPendingDraft(storedState)
+        // A draft, if any, is this device's own unsynced work — load it straight
+        // in rather than gating it behind a resume/discard click. Students the
+        // lab hasn't placed yet start in their usual kitchen.
+        setSection(buildSection(r, storedState.draft ?? storedState.committed, state, standingKitchens))
         // A leftover draft that matches the commit is noise: clear it.
-        else if (storedState.draft) discardDraft(labId, sectionId).then(st => { if (!cancelled) setStored(st) })
+        if (storedState.draft && !isUnsavedDraft(storedState)) {
+          discardDraft(labId, sectionId).then(st => { if (!cancelled) setStored(st) })
+        }
       })
       .catch(err => { if (!cancelled) { setRoster([]); setLoadError(err.message) } })
       .finally(() => { if (!cancelled) setRosterLoading(false) })
@@ -230,15 +230,12 @@ export default function KitchenScorePanel({
     }
   }, [applySection, courseId, sectionId, latestLab, toast])
 
-  function resumeDraft() {
-    const draft = buildSection(roster, pendingDraft.draft, profState, standing)
-    setSection(draft)
-    setPendingDraft(null)
-  }
-
-  async function discardAndUseCanvas() {
-    setStored(await discardDraft(labId, sectionId))
-    setPendingDraft(null) // section already shows the committed baseline
+  // Throws away this device's unsaved edits and rebuilds the screen from the
+  // last committed set (or, if never committed, Canvas's present/absent/excused).
+  async function discardDraftNow() {
+    const next = await discardDraft(labId, sectionId)
+    setStored(next)
+    setSection(buildSection(roster, next.committed, profState, standing))
   }
 
   async function refreshScores() {
@@ -300,7 +297,6 @@ export default function KitchenScorePanel({
         const posted = Object.fromEntries(plan.students.filter(s => s.after).map(s => [s.userId, { prof: s.after }]))
         clearTimeout(autosaveTimer.current)
         setStored(await commitLabGrading(labId, sectionId, section, { posted, keepLastCommit: true }))
-        setPendingDraft(null)
       }
     } catch (err) {
       setPreview({ error: err.message })
@@ -337,7 +333,6 @@ export default function KitchenScorePanel({
         .map(s => [s.userId, { prof: s.after }]))
       const nextStored = await commitLabGrading(labId, sectionId, section, { record, keepDraft: failures.length > 0, posted })
       setStored(nextStored)
-      setPendingDraft(null)
       await refreshScores()
       setConfirming(false)
       if (failures.length) {
@@ -392,9 +387,8 @@ export default function KitchenScorePanel({
       })
       const nextStored = await revertLabGrading(labId, sectionId, { skipped: skip })
       setStored(nextStored)
-      // The reverted work is now a draft — offer it like any saved work.
-      setSection(buildSection(roster, nextStored.committed, profState, standing))
-      if (nextStored.draft) setPendingDraft(nextStored)
+      // The reverted work is now a draft; load it straight in like any saved work.
+      setSection(buildSection(roster, nextStored.draft ?? nextStored.committed, profState, standing))
       await refreshScores()
       setReverting(false)
       if (failures.length) toast(`Reverted, but ${failures.length} student${failures.length === 1 ? '' : 's'} could not be restored. Details: Settings › Testing › Diagnostics`, 'warning')
@@ -557,7 +551,7 @@ export default function KitchenScorePanel({
       )}
 
       {/* What the open period's state means. */}
-      {entry && sectionId && !rosterLoading && !pendingDraft && (statuses[sectionId] || stored?.lastCommit) && (
+      {entry && sectionId && !rosterLoading && (statuses[sectionId] || stored?.lastCommit) && (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className={`text-sm ${statuses[sectionId] === 'done' ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}`}>
             {statuses[sectionId] === 'done'
@@ -565,33 +559,19 @@ export default function KitchenScorePanel({
               : '• Unsaved edits on this device. Not in Canvas yet: commit to send them.'}
           </p>
           {/* Up here, away from Commit, so a mis-tap on the iPad can't hit it. */}
-          {stored?.lastCommit && (
-            <Button variant="ghost" size="sm" icon={Undo2} onClick={openRevert}>
-              Revert last commit ({fmtWhen(stored.lastCommit.at)})
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* Resume/discard prompt: local work exists that is newer than Canvas. */}
-      {pendingDraft && (
-        <Card className="border-2 border-[var(--color-warning)] bg-[var(--color-bg-hover)]">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={18} className="text-[var(--color-warning)] mt-0.5 shrink-0" />
-            <div className="flex-1 space-y-2">
-              <p className="text-sm font-medium text-[var(--color-text-body)]">
-                There is saved work from {fmtWhen(pendingDraft.updatedAt)} on this period.
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Resume your unsaved draft, or discard it and load the current scores from Canvas.
-              </p>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={resumeDraft}>Resume draft</Button>
-                <Button size="sm" variant="secondary" onClick={discardAndUseCanvas}>Discard &amp; use Canvas</Button>
-              </div>
-            </div>
+          <div className="flex items-center gap-1">
+            {statuses[sectionId] === 'draft' && (
+              <Button variant="ghost" size="sm" onClick={discardDraftNow}>
+                Discard draft
+              </Button>
+            )}
+            {stored?.lastCommit && (
+              <Button variant="ghost" size="sm" icon={Undo2} onClick={openRevert}>
+                Revert last commit ({fmtWhen(stored.lastCommit.at)})
+              </Button>
+            )}
           </div>
-        </Card>
+        </div>
       )}
 
       {rosterLoading && <Skeleton height="20rem" />}

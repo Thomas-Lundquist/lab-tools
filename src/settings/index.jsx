@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { CheckCircle, AlertCircle, Loader, ShieldCheck, ShieldOff, Star, X } from 'lucide-react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { CheckCircle, AlertCircle, Loader, ShieldCheck, ShieldOff, Star, X, Plus, Pencil, Trash2, Upload } from 'lucide-react'
 import { BrandLogo } from '../components/AppNav.jsx'
 import ToolShell from '../components/ToolShell.jsx'
 import SkipLink from '../components/SkipLink.jsx'
@@ -7,6 +7,7 @@ import Card from '../components/Card.jsx'
 import Button from '../components/Button.jsx'
 import FieldLabel from '../components/FieldLabel.jsx'
 import TextField from '../components/TextField.jsx'
+import Textarea from '../components/Textarea.jsx'
 import Select from '../components/Select.jsx'
 import Callout from '../components/Callout.jsx'
 import Skeleton from '../components/Skeleton.jsx'
@@ -15,7 +16,10 @@ import { getCurrentUser } from '../api/auth.js'
 import { canvasOrigin } from '../api/canvasContext.js'
 import { getCourses } from '../api/courses.js'
 import { getPreferences, setPreference } from '../storage/preferences.js'
-import { getFlags, saveFlags, getCommentBank, saveCommentBank } from '../storage/setup.js'
+import {
+  getFlags, saveFlags, getCommentBank, saveCommentBank,
+  getTemplates, saveTemplate, deleteTemplate,
+} from '../storage/setup.js'
 import { DEFAULT_FLAGS } from '../config/labFlags.js'
 import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../security/pin.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
@@ -237,6 +241,149 @@ function CommentBank() {
         </>
       )}
     </div>
+  )
+}
+
+// Name + raw HTML + an optional "Upload .html file" shortcut (FileReader,
+// client-side only — no server round-trip, matching this app's no-serverless-
+// API invariant) + a sandboxed preview. Shared by "New template" and "Edit".
+// The iframe (not dangerouslySetInnerHTML) means a pasted <script> renders
+// inert instead of running against the app's own Canvas session.
+function TemplateEditor({ initial, onCancel, onSave }) {
+  const [name, setName] = useState(initial?.name ?? '')
+  const [html, setHtml] = useState(initial?.html ?? '')
+  const fileInputRef = useRef(null)
+
+  function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setHtml(String(reader.result ?? ''))
+    reader.readAsText(file)
+    e.target.value = '' // allow re-selecting the same file again later
+  }
+
+  function save() {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    onSave({ ...(initial ?? {}), name: trimmed, html })
+  }
+
+  return (
+    <div className="space-y-3 rounded-[var(--radius-control)] bg-[var(--color-bg-hover)] p-3">
+      <div>
+        <FieldLabel htmlFor="tmpl-name">Name</FieldLabel>
+        <TextField id="tmpl-name" value={name} onChange={setName} placeholder="Lab instructions" className="max-w-sm" />
+      </div>
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <FieldLabel htmlFor="tmpl-html">HTML</FieldLabel>
+          <div>
+            <input ref={fileInputRef} type="file" accept=".html,text/html" onChange={handleFile} className="hidden" />
+            <Button variant="secondary" size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>
+              Upload .html file
+            </Button>
+          </div>
+        </div>
+        <Textarea id="tmpl-html" value={html} onChange={setHtml} rows={8} placeholder="<p>Instructions…</p>" />
+      </div>
+      {html.trim() && (
+        <div>
+          <FieldLabel>Preview</FieldLabel>
+          <iframe
+            sandbox=""
+            srcDoc={html}
+            title={`${name || 'Template'} preview`}
+            className="w-full h-48 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-white"
+          />
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Button size="sm" onClick={save} disabled={!name.trim()}>Save</Button>
+        <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  )
+}
+
+// Reusable HTML deployed into a new Professionalism assignment's description
+// at creation time (Course settings picks a default; the create form can
+// override it per assignment) — never touches an assignment already made.
+// One library shared by every course, like the lab flags and comment bank.
+function TemplatesSection() {
+  const [templates, setTemplates] = useState(null)
+  const [adding, setAdding]       = useState(false)
+  const [editingId, setEditingId] = useState(null)
+
+  useEffect(() => { getTemplates().then(setTemplates) }, [])
+
+  async function handleSave(tmpl) {
+    const saved = await saveTemplate(tmpl)
+    setTemplates(prev => [...(prev ?? []).filter(t => t.id !== saved.id), saved])
+    setAdding(false)
+    setEditingId(null)
+  }
+
+  async function handleDelete(id) {
+    await deleteTemplate(id)
+    setTemplates(prev => (prev ?? []).filter(t => t.id !== id))
+    if (editingId === id) setEditingId(null)
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Professionalism templates</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Reusable HTML deployed into a new Professionalism assignment's description. Pick a default per course in
+          Course settings, or choose one on the Lab tool's Create form when you make an assignment.
+        </p>
+      </div>
+
+      {!templates ? <Skeleton height="3rem" /> : (
+        <>
+          <div className="divide-y divide-[var(--color-border-subtle)]">
+            {templates.map(t => (
+              <div key={t.id} className="py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-[var(--color-text-body)]">{t.name}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => { setEditingId(editingId === t.id ? null : t.id); setAdding(false) }}
+                      aria-label={`Edit ${t.name}`}
+                      className="p-1.5 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-surface)]"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(t.id)}
+                      aria-label={`Delete ${t.name}`}
+                      className="p-1.5 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--color-bg-surface)]"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+                {editingId === t.id && (
+                  <div className="mt-2">
+                    <TemplateEditor initial={t} onCancel={() => setEditingId(null)} onSave={handleSave} />
+                  </div>
+                )}
+              </div>
+            ))}
+            {templates.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-2">No templates yet.</p>}
+          </div>
+
+          {adding ? (
+            <TemplateEditor onCancel={() => setAdding(false)} onSave={handleSave} />
+          ) : (
+            <Button variant="secondary" size="sm" icon={Plus} onClick={() => { setAdding(true); setEditingId(null) }}>
+              New template
+            </Button>
+          )}
+        </>
+      )}
+    </Card>
   )
 }
 
@@ -467,6 +614,7 @@ export default function Settings() {
             <AccountSection />
             <AppearanceSection />
             <CoursesSection />
+            <TemplatesSection />
             <GradingSection />
             <SyncSection />
             <SecuritySection />

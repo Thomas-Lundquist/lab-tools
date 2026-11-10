@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Link2, BookOpen, AlertTriangle, Trash2, Loader, X } from 'lucide-react'
+import { Plus, Link2, BookOpen, AlertTriangle, Trash2, Loader, X, Pencil } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Modal from '../../components/Modal.jsx'
@@ -14,35 +14,17 @@ import { getSections } from '../../api/sections.js'
 import { getAssignments, createAssignment, deleteAssignment } from '../../api/assignments.js'
 import { getAssignmentSubmissions } from '../../api/submissions.js'
 import { NotFoundError } from '../../api/errors.js'
-import { createOverride, updateOverride, getOverrides } from '../../api/overrides.js'
+import { createOverride, updateOverride, deleteOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
-import { getCourseSetup, getLabs, saveLab, deleteLab, isStandalone } from '../../storage/setup.js'
+import { getCourseSetup, getLabs, saveLab, deleteLab, isStandalone, getTemplates } from '../../storage/setup.js'
 import { clearAllLabGrading, getAllLabGrading } from '../../storage/labGrading.js'
 import { loadJournalUndo, runJournalUndo } from './labRemoval.js'
 import { isProfessionalismAssignment } from './scoring.js'
-
-// JournalSelect sentinel for "no journal — standalone". The primary form
-// requires an explicit pick (placeholder is disabled), so a real lab can't end
-// up Standalone just because the teacher forgot to choose its Journal.
-const STANDALONE = 'standalone'
-
-// Scope options for the create form. 'all' is the historical behavior — the
-// assignment is visible to the whole course. 'A' / 'B' restrict it to the
-// sections tagged with that day type in Course Settings.
-const SCOPE_OPTIONS = [
-  { value: 'all', label: 'All periods' },
-  { value: 'A', label: 'A-day periods only' },
-  { value: 'B', label: 'B-day periods only' },
-]
-
-// Which sections a given scope targets. 'all' is every section; an 'A'/'B'
-// scope keeps only sections tagged with that day type. Sections with no day
-// type set are intentionally excluded from a scoped create — the teacher adds
-// them afterward with "Add a section" once they know that section's date.
-function sectionsInScope(sections, courseSetup, scope) {
-  if (scope === 'all') return sections
-  return sections.filter(sec => courseSetup?.sections?.[sec.id]?.dayType === scope)
-}
+import {
+  STANDALONE, JournalSelect, ModulePicker, SCOPE_OPTIONS, sectionsInScope, inferScope,
+  professionalismOverrideDates, journalOverrideDates,
+} from './LabFormFields.jsx'
+import EditLabModal from './EditLabModal.jsx'
 
 // Normalize a title before comparing two of them. Trim + lowercase mirrors the
 // comparison Scoring already uses to find a lab's assignment by name, so what
@@ -66,59 +48,15 @@ export function findDuplicateAssignments(title, assignments) {
   return assignments.filter(a => normalizeTitle(a.name) === target)
 }
 
-// ISO for the end (23:59) and start (00:00) of a YYYY-MM-DD date string, in the
-// browser's local zone, matching how the form writes section override dates.
-function endOfDayIso(dateStr) {
-  return new Date(`${dateStr}T23:59:00`).toISOString()
-}
-function startOfDayIso(dateStr) {
-  return new Date(`${dateStr}T00:00:00`).toISOString()
-}
-
-// A YYYY-MM-DD string shifted by a whole number of days. These offsets are fixed
-// arithmetic on a date the teacher typed (the lab date) — not a guess about the
-// A/B calendar — so +1 and +14 are safe to derive automatically.
-function addDays(dateStr, days) {
-  if (!dateStr) return ''
-  const d = new Date(`${dateStr}T00:00:00`)
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
-// The lab date drives every override date. A Professionalism assignment takes no
-// submission, so it opens and closes on the lab day itself. Its paired Journal
-// opens the lab day, is due some days later, and closes some days after that —
-// both offsets come from Course Settings (defaults: due +1 day, close +14 days
-// after due).
-function professionalismOverrideDates(labDate) {
-  return { unlockAt: startOfDayIso(labDate), dueAt: endOfDayIso(labDate), lockAt: endOfDayIso(labDate) }
-}
-function journalOverrideDates(labDate, dueOffsetDays, closeOffsetDays) {
-  const dueDate = addDays(labDate, dueOffsetDays)
-  return {
-    unlockAt: startOfDayIso(labDate),
-    dueAt: endOfDayIso(dueDate),
-    lockAt: endOfDayIso(addDays(dueDate, closeOffsetDays)),
-  }
-}
-
-// A short scope summary for a row. An assignment that isn't override-gated is
-// visible to everyone ("All sections"). A gated one is summarized by the day
-// type of its section overrides — the common case is every override on the same
-// day (1A + 2A → "A day"). Anything mixed, untagged, or student-targeted falls
-// back to "Custom" rather than claiming a day it can't prove.
+// A short scope summary for a row, built on the same inference EditLabModal
+// uses to seed its Scope picker — see LabFormFields.jsx's inferScope.
 function scopeBadge(assignment, courseSetup) {
-  if (!assignment) return null
-  if (!assignment.onlyVisibleToOverrides) return 'All periods'
-  const sectionOverrides = (assignment.overrides ?? []).filter(o => o.courseSectionId)
-  if (sectionOverrides.length === 0) return 'Custom'
-  const dayTypes = new Set(sectionOverrides.map(o => courseSetup?.sections?.[o.courseSectionId]?.dayType))
-  if (dayTypes.size === 1) {
-    const only = [...dayTypes][0]
-    if (only === 'A') return 'A day'
-    if (only === 'B') return 'B day'
-  }
-  return 'Custom'
+  const scope = inferScope(assignment, courseSetup)
+  if (scope === 'all') return 'All periods'
+  if (scope === 'A') return 'A day'
+  if (scope === 'B') return 'B day'
+  if (scope === 'custom') return 'Custom'
+  return null
 }
 
 // Strips a trailing "Lab" from an existing journal's name, then the full
@@ -127,48 +65,6 @@ function scopeBadge(assignment, courseSetup) {
 // (still fully editable; nothing is appended silently at submit time).
 function stripLabSuffix(name) {
   return name.replace(/\s*lab\s*$/i, '').trim()
-}
-
-// requireChoice: the primary form's picker opens on a disabled placeholder,
-// with "No journal — standalone" as an explicit option under it (value
-// STANDALONE). The link-fallback's picker stays optional — its empty value
-// already means standalone, since there the Professionalism assignment is
-// picked separately.
-function JournalSelect({ id, value, onChange, labOptions, otherOptions, requireChoice = false }) {
-  const otherLabel = labOptions.length > 0 ? 'Other assignments' : 'Assignments'
-  return (
-    <Select id={id} value={value} onChange={onChange}>
-      {requireChoice ? (
-        <>
-          <option value="" disabled>Select a journal, or standalone</option>
-          <option value={STANDALONE}>No journal — standalone</option>
-        </>
-      ) : (
-        <option value="">No journal — standalone</option>
-      )}
-      {labOptions.length > 0 && (
-        <optgroup label="Published lab assignments">
-          {labOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </optgroup>
-      )}
-      {otherOptions.length > 0 && (
-        <optgroup label={otherLabel}>
-          {otherOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </optgroup>
-      )}
-    </Select>
-  )
-}
-
-function ModulePicker({ id, modules, value, onChange }) {
-  return (
-    <Select
-      id={id}
-      value={value}
-      onChange={onChange}
-      options={[{ value: '', label: 'No module' }, ...modules.map(m => ({ value: m.id, label: m.name }))]}
-    />
-  )
 }
 
 // One lab date per section, tucked behind a native <details> so the common case
@@ -204,7 +100,7 @@ function SectionDatesAccordion({ sections, dates, onChange }) {
 // has none to show. Each row can also take a new section (with its own due
 // date) after the fact: an assignment first created for just the A-day or B-day
 // sections gets extended to another section here, once that date is known.
-function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove }) {
+function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove, onEdit }) {
   const toast = useToast()
   const mod = modules.find(m => m.id === entry.moduleId)
   const journal = assignments.find(a => a.id === entry.journalAssignmentId)
@@ -217,6 +113,9 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
   const [sectionId, setSectionId] = useState('')
   const [labDate, setLabDate]     = useState('')
   const [busy, setBusy]           = useState(false)
+  // Which covered section's date is being edited in place, and its draft value.
+  const [editingSectionId, setEditingSectionId] = useState(null)
+  const [editSectionDate, setEditSectionDate]   = useState('')
 
   const journalDueOffset   = courseSetup?.settings?.journalDueOffsetDays ?? 1
   const journalCloseOffset = courseSetup?.settings?.labCloseDateOffsetDays ?? 14
@@ -268,6 +167,70 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
     }
   }
 
+  // Un-assigns a period Canvas mistakenly got added to (or one the teacher
+  // just wants off this assignment), the reverse of "Add a period": removes
+  // its professionalism override (and the paired journal's, if any), then
+  // drops the period's lab date from this tool's own record so it stops
+  // showing as due or appearing in the date range shown on the list.
+  async function handleRemoveSection(sectionId) {
+    const sec = sections.find(s => s.id === sectionId)
+    setBusy(true)
+    try {
+      const profOverride = (overrides ?? []).find(o => o.courseSectionId === sectionId)
+      if (profOverride) await deleteOverride(courseId, assignmentId, profOverride.id)
+      if (!isStandalone(entry) && entry.journalAssignmentId) {
+        const journalOverrides = await getOverrides(courseId, entry.journalAssignmentId)
+        const journalOverride = journalOverrides.find(o => o.courseSectionId === sectionId)
+        if (journalOverride) await deleteOverride(courseId, entry.journalAssignmentId, journalOverride.id)
+      }
+      if (entry.dates?.[sectionId] !== undefined || entry.closeDates?.[sectionId] !== undefined) {
+        const dates = { ...entry.dates }; delete dates[sectionId]
+        const closeDates = { ...entry.closeDates }; delete closeDates[sectionId]
+        await saveLab({ id: entry.id, dates, closeDates })
+      }
+      toast(`Removed ${sec?.name ?? 'the period'} from "${professionalism?.name ?? entry.name}".`, 'success')
+      await loadOverrides()
+      onAdded?.()
+    } catch (err) {
+      toast(`Could not remove ${sec?.name ?? 'the period'}: ${err.message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Edits an already-covered section's lab date in place — same effect as a
+  // remove followed by an add, without the round trip (and without a moment
+  // where the section has no override at all). Mirrors handleAdd's
+  // existing-vs-create check, since a section can be covered by a dateless
+  // visibility override (added via a scope change) with nothing yet to update.
+  async function handleEditSectionDate(sectionId) {
+    const sec = sections.find(s => s.id === sectionId)
+    if (!editSectionDate) { toast('Enter the lab date for the period.', 'warning'); return }
+    setBusy(true)
+    try {
+      const profFields = { courseSectionId: sectionId, ...professionalismOverrideDates(editSectionDate), title: sec?.name ?? sectionId }
+      const profOverride = (overrides ?? []).find(o => o.courseSectionId === sectionId)
+      if (profOverride) await updateOverride(courseId, assignmentId, profOverride.id, profFields)
+      else await createOverride(courseId, assignmentId, profFields)
+      if (!isStandalone(entry) && entry.journalAssignmentId) {
+        const journalFields = { courseSectionId: sectionId, ...journalOverrideDates(editSectionDate, journalDueOffset, journalCloseOffset), title: sec?.name ?? sectionId }
+        const journalOverrides = await getOverrides(courseId, entry.journalAssignmentId)
+        const journalOverride = journalOverrides.find(o => o.courseSectionId === sectionId)
+        if (journalOverride) await updateOverride(courseId, entry.journalAssignmentId, journalOverride.id, journalFields)
+        else await createOverride(courseId, entry.journalAssignmentId, journalFields)
+      }
+      await saveLab({ id: entry.id, dates: { ...entry.dates, [sectionId]: editSectionDate } })
+      toast(`Updated ${sec?.name ?? 'the period'}'s lab date.`, 'success')
+      setEditingSectionId(null)
+      await loadOverrides()
+      onAdded?.()
+    } catch (err) {
+      toast(`Could not update ${sec?.name ?? 'the period'}: ${err.message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const when = fmtLabDates(entry)
   return (
     <div className="px-3 py-2 space-y-1 text-sm">
@@ -302,6 +265,15 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
           )}
           <button
             type="button"
+            onClick={() => onEdit(entry)}
+            title="Edit"
+            aria-label={`Edit ${professionalism?.name ?? entry.name}`}
+            className="p-1.5 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-hover)]"
+          >
+            <Pencil size={15} />
+          </button>
+          <button
+            type="button"
             onClick={() => onRemove(entry)}
             title="Delete"
             aria-label={`Delete ${professionalism?.name ?? entry.name}`}
@@ -316,10 +288,73 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
         <div className="mt-2 rounded-[var(--radius-control)] bg-[var(--color-bg-hover)] p-3 space-y-3">
           {overrides === null ? (
             <p className="text-xs text-[var(--color-text-muted)]">Loading periods…</p>
-          ) : availableSections.length === 0 ? (
-            <p className="text-xs text-[var(--color-text-muted)]">Every period already has a date on this assignment.</p>
           ) : (
             <>
+              {coveredSectionIds.size > 0 && (
+                <div className="space-y-1">
+                  <FieldLabel>Periods on this assignment</FieldLabel>
+                  {[...coveredSectionIds].map(id => {
+                    const sec = sections.find(s => s.id === id)
+                    const editing = editingSectionId === id
+                    return (
+                      <div key={id} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-[var(--color-text-body)]">{sec?.name ?? id}</span>
+                        {editing ? (
+                          <div className="flex items-center gap-1.5">
+                            <TextField
+                              type="date"
+                              value={editSectionDate}
+                              onChange={setEditSectionDate}
+                              className="max-w-[9rem]"
+                              aria-label={`${sec?.name ?? 'this period'}'s lab date`}
+                            />
+                            <Button size="sm" variant="ghost" onClick={() => handleEditSectionDate(id)} disabled={busy}>
+                              Save
+                            </Button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingSectionId(null)}
+                              disabled={busy}
+                              title="Cancel"
+                              aria-label={`Cancel editing ${sec?.name ?? 'this period'}'s lab date`}
+                              className="p-1 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-subtle)]"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => { setEditingSectionId(id); setEditSectionDate(entry.dates?.[id] ?? '') }}
+                              disabled={busy}
+                              title={`Edit ${sec?.name ?? 'this period'}'s lab date`}
+                              aria-label={`Edit ${sec?.name ?? 'this period'}'s lab date`}
+                              className="p-1 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-subtle)]"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSection(id)}
+                              disabled={busy}
+                              title={`Remove ${sec?.name ?? 'this period'}`}
+                              aria-label={`Remove ${sec?.name ?? 'this period'} from ${professionalism?.name ?? entry.name}`}
+                              className="p-1 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--color-bg-subtle)]"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {availableSections.length === 0 ? (
+                <p className="text-xs text-[var(--color-text-muted)]">Every period already has a date on this assignment.</p>
+              ) : (
+                <>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
                   <FieldLabel htmlFor={`sec-${entry.id}`}>Period</FieldLabel>
@@ -339,6 +374,8 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
               <Button size="sm" icon={Plus} onClick={handleAdd} disabled={busy}>
                 {busy ? 'Adding…' : 'Add period'}
               </Button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -370,7 +407,7 @@ function fmtLabDates(entry) {
 
 // The tracked assignments as one list, newest lab first, with a search and a
 // Unit filter so a full year stays usable. Scrolls inside its card.
-function EntryList({ entries, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove }) {
+function EntryList({ entries, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove, onEdit }) {
   const [query, setQuery]   = useState('')
   const [unitId, setUnitId] = useState('')
   const q = query.trim().toLowerCase()
@@ -413,6 +450,7 @@ function EntryList({ entries, assignments, modules, courseId, sections, courseSe
               courseSetup={courseSetup}
               onAdded={onAdded}
               onRemove={onRemove}
+              onEdit={onEdit}
             />
           ))}
         </div>
@@ -585,12 +623,14 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [mode, setMode]               = useState(null)
   const [showAllJournals, setShowAllJournals] = useState(false)
   const [removing, setRemoving]       = useState(null) // entry in the delete modal
+  const [editing, setEditing]         = useState(null) // entry in the edit modal
   const [loading, setLoading]         = useState(false)
   const [sections, setSections]       = useState([])
   const [assignments, setAssignments] = useState([])
   const [modules, setModules]         = useState([])
   const [entries, setEntries]         = useState([])
   const [courseSetup, setCourseSetup] = useState(null)
+  const [templates, setTemplates]     = useState([])
 
   // Create-new form state
   const [name, setName]               = useState('')
@@ -600,12 +640,14 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [aDate, setADateRaw]          = useState('')
   const [bDate, setBDateRaw]          = useState('')
   const [sectionDueDates, setSectionDueDates]     = useState({})
+  const [templateId, setTemplateIdRaw] = useState('')
   const [creating, setCreating]       = useState(false)
   // Non-null while the duplicate-title warning is open. Holds the validated
   // create context plus the colliding assignments, so the modal's buttons can
   // drive performCreate without re-validating. See handleCreate.
   const [dupPrompt, setDupPrompt]     = useState(null)
   const touchedDueSections   = useRef(new Set())
+  const touchedTemplate      = useRef(false)
 
   // Link-existing: search the course's professionalism assignments and link one
   // (with an optional Module for rollup) straight into grading.
@@ -634,8 +676,9 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       getModules(courseId),
       getLabs(courseId),
       getCourseSetup(courseId),
+      getTemplates(),
     ])
-      .then(([secs, labAsns, profAsns, mods, l, s]) => {
+      .then(([secs, labAsns, profAsns, mods, l, s, tmpls]) => {
         const byId = new Map()
         for (const a of [...labAsns, ...profAsns]) byId.set(a.id, a)
         setSections(secs)
@@ -643,6 +686,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         setModules(mods)
         setEntries(l)
         setCourseSetup(s)
+        setTemplates(tmpls)
       })
       .finally(() => setLoading(false))
   }, [courseId, setupVersion])
@@ -660,6 +704,19 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       return next
     })
   }, [aDate, bDate, sections, courseSetup])
+
+  // Default the Template picker to the course's configured default, unless
+  // the teacher has already picked a different one this session (same
+  // touched-ref pattern as the per-section due dates above).
+  useEffect(() => {
+    if (touchedTemplate.current) return
+    setTemplateIdRaw(courseSetup?.settings?.professionalismTemplateId ?? '')
+  }, [courseSetup])
+
+  function setTemplateId(v) {
+    touchedTemplate.current = true
+    setTemplateIdRaw(v)
+  }
 
   // Picking a Journal prefills two fields it already implies: the module the
   // Journal lives in (published or not — module_ids covers both), and the
@@ -692,6 +749,8 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     setADateRaw(''); setBDateRaw('')
     setSectionDueDates({})
     touchedDueSections.current = new Set()
+    setTemplateIdRaw(courseSetup?.settings?.professionalismTemplateId ?? '')
+    touchedTemplate.current = false
   }
 
   async function handleCreate() {
@@ -719,7 +778,8 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       return
     }
     const expectedTitle = name.trim()
-    const ctx = { expectedTitle, freshSetup, standalone, scoped, targetSections }
+    const templateHtml = templates.find(t => t.id === templateId)?.html ?? ''
+    const ctx = { expectedTitle, freshSetup, standalone, scoped, targetSections, templateHtml }
 
     // Protect against making the same lab's assignment twice. If any assignment
     // already carries this title, stop and let the teacher decide: reuse it,
@@ -737,10 +797,12 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   // handleCreate so both "Reuse existing" and "Create anyway" share one path with
   // the already-validated context.
   async function performCreate(ctx, reuseTarget) {
-    const { expectedTitle, freshSetup, standalone, scoped, targetSections } = ctx
+    const { expectedTitle, freshSetup, standalone, scoped, targetSections, templateHtml } = ctx
     setCreating(true)
     try {
       const existing = reuseTarget
+      // A reused assignment keeps whatever description it already has in
+      // Canvas — the template only ever fills a brand-new one.
       const assignment = existing ?? await createAssignment(courseId, {
         name: expectedTitle,
         pointsPossible: 4,
@@ -749,6 +811,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         assignmentGroupId: freshSetup.professionalismGroupId,
         published: true,
         postToSis: freshSetup.settings.syncLabsToFocus,
+        description: templateHtml,
         // A scoped assignment is hidden from everyone; the per-section overrides
         // below are what reveal it to the chosen day's sections.
         onlyVisibleToOverrides: scoped,
@@ -1038,6 +1101,22 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
           <ModulePicker id="module" modules={modules} value={moduleId} onChange={setModuleId} />
         </div>
 
+        {templates.length > 0 && (
+          <div>
+            <FieldLabel htmlFor="template">Template</FieldLabel>
+            <Select
+              id="template"
+              value={templateId}
+              onChange={setTemplateId}
+              className="max-w-xs"
+              options={[{ value: '', label: 'No template' }, ...templates.map(t => ({ value: t.id, label: t.name }))]}
+            />
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              Deployed into the new assignment's description. Defaults to this course's template (Course settings) — change it here just for this one.
+            </p>
+          </div>
+        )}
+
         <div>
           <FieldLabel htmlFor="scope">Assign to</FieldLabel>
           <Select id="scope" value={scope} onChange={setScope} options={SCOPE_OPTIONS} className="max-w-xs" />
@@ -1215,13 +1294,27 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       {entries.length > 0 && (
         <Card>
           <EntryList entries={entries} assignments={assignments} modules={modules} courseId={courseId} sections={sections}
-            courseSetup={courseSetup} onAdded={onChanged} onRemove={setRemoving} />
+            courseSetup={courseSetup} onAdded={onChanged} onRemove={setRemoving} onEdit={setEditing} />
         </Card>
       )}
 
       {removing && (
         <RemoveLabModal entry={removing} assignments={assignments} courseId={courseId} courseName={courseName}
           onClose={() => setRemoving(null)} onRemoved={handleRemoved} />
+      )}
+
+      {editing && (
+        <EditLabModal
+          entry={editing}
+          assignment={assignments.find(a => a.id === editing.professionalismAssignmentId)}
+          assignments={assignments}
+          modules={modules}
+          sections={sections}
+          courseSetup={courseSetup}
+          courseId={courseId}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); onChanged?.() }}
+        />
       )}
     </div>
   )

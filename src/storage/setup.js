@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = {
   zeroJournalWhenAbsent: true,
   journalDueOffsetDays: 1,      // Journal due date = lab date + this many days
   labCloseDateOffsetDays: 14,   // Journal close date = Journal due date + this many days
+  professionalismTemplateId: null, // default template id (see Templates below) deployed into a new Professionalism assignment's description
 }
 
 const DEFAULT_COURSE = {
@@ -42,6 +43,7 @@ const DEFAULTS = {
   courses: {},  // courseId -> course config (see DEFAULT_COURSE)
   labs: {},     // labId   -> { id, courseId, moduleId, name, professionalismAssignmentId, journalAssignmentId, dates: { sectionId: isoDate }, closeDates: { sectionId: isoDate } }
   terms: {},    // termId  -> { id, courseId, name, moduleIds: [] }
+  templates: {}, // templateId -> { id, name, html } — see Templates below
 }
 
 export async function getSetup() {
@@ -216,4 +218,34 @@ export async function saveCommentBank(list) {
   setup.commentLibrary = list
   await saveSetup(setup)
   return list
+}
+
+// ---- Assignment templates ----
+// Reusable HTML, pasted or uploaded in Settings, one library shared by every
+// course (like flags and the comment bank). A course picks one as its default
+// (settings.professionalismTemplateId) and the Professionalism create form can
+// override that per assignment; either way the chosen template's `html` is
+// copied into the new Canvas assignment's description at creation time only —
+// nothing here ever touches an assignment already created.
+
+export async function getTemplates() {
+  const setup = await getSetup()
+  return Object.values(setup.templates ?? {})
+}
+
+export async function saveTemplate(template) {
+  const setup = await getSetup()
+  const id = template.id ?? `tmpl_${Date.now()}`
+  const updated = { ...setup.templates[id], ...template, id }
+  setup.templates = { ...setup.templates, [id]: updated }
+  await saveSetup(setup)
+  return updated
+}
+
+export async function deleteTemplate(id) {
+  const setup = await getSetup()
+  const templates = { ...setup.templates }
+  delete templates[id]
+  setup.templates = templates
+  await saveSetup(setup)
 }
