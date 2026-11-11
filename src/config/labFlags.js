@@ -55,13 +55,19 @@ export function resolveFlags(stored) {
   return stored ?? DEFAULT_FLAGS
 }
 
+function byLabel(a, b) {
+  return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+}
+
 // Split a flag list into the lookups the screens need: an id->flag map plus the
-// scope-filtered arrays the kitchen/individual pickers render.
+// scope-filtered arrays the kitchen/individual pickers render, alphabetized by
+// label so the checklist is easy to scan regardless of the order flags were
+// added in.
 export function flagIndex(flags = DEFAULT_FLAGS) {
   return {
     byId: Object.fromEntries(flags.map(f => [f.id, f])),
-    kitchen: flags.filter(f => f.scope === 'kitchen'),
-    individual: flags.filter(f => f.scope === 'individual'),
+    kitchen: flags.filter(f => f.scope === 'kitchen').sort(byLabel),
+    individual: flags.filter(f => f.scope === 'individual').sort(byLabel),
   }
 }
 

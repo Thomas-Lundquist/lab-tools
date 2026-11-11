@@ -4,6 +4,7 @@ import { BrandLogo } from '../components/AppNav.jsx'
 import ToolShell from '../components/ToolShell.jsx'
 import SkipLink from '../components/SkipLink.jsx'
 import Card from '../components/Card.jsx'
+import Disclosure from '../components/Disclosure.jsx'
 import Button from '../components/Button.jsx'
 import FieldLabel from '../components/FieldLabel.jsx'
 import TextField from '../components/TextField.jsx'
@@ -20,7 +21,7 @@ import {
   getFlags, saveFlags, getCommentBank, saveCommentBank,
   getTemplates, saveTemplate, deleteTemplate,
 } from '../storage/setup.js'
-import { DEFAULT_FLAGS } from '../config/labFlags.js'
+import { DEFAULT_FLAGS, flagIndex } from '../config/labFlags.js'
 import { getSecuritySettings, setupPin, clearPin, resetExtension } from '../security/pin.js'
 import { applyPalette, applyDarkMode, applyTextSize } from '../utils/color.js'
 import { navigate } from '../utils/nav.js'
@@ -154,7 +155,7 @@ function CoursesSection() {
           <Skeleton height="2.5rem" />
         </div>
       ) : (
-        <>
+        <Disclosure title="Course list" count={courses.length} defaultOpen={courses.length <= 6}>
           {courses.length > 6 && (
             <TextField value={search} onChange={setSearch} placeholder="Search courses" className="max-w-xs" />
           )}
@@ -185,7 +186,7 @@ function CoursesSection() {
             })}
             {filtered.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-4 text-center">No courses match.</p>}
           </div>
-        </>
+        </Disclosure>
       )}
     </Card>
   )
@@ -222,7 +223,7 @@ function CommentBank() {
         Reusable feedback you can tap on each student in the Lab tab. It's added to the submission comment and doesn't change the score.
       </p>
       {!bank ? <Skeleton height="3rem" /> : (
-        <>
+        <Disclosure title="Saved comments" count={bank.length} defaultOpen={bank.length <= 6}>
           <div className="flex flex-wrap gap-2">
             {bank.map(c => (
               <span key={c} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
@@ -238,7 +239,7 @@ function CommentBank() {
             <TextField value={draft} onChange={setDraft} placeholder="Add a comment" aria-label="New comment" className="max-w-md flex-1" onKeyDown={e => e.key === 'Enter' && add()} />
             <Button variant="secondary" size="sm" onClick={add}>Add</Button>
           </div>
-        </>
+        </Disclosure>
       )}
     </div>
   )
@@ -341,7 +342,7 @@ function TemplatesSection() {
       </div>
 
       {!templates ? <Skeleton height="3rem" /> : (
-        <>
+        <Disclosure title="Templates" count={templates.length} defaultOpen={templates.length <= 4}>
           <div className="divide-y divide-[var(--color-border-subtle)]">
             {templates.map(t => (
               <div key={t.id} className="py-2">
@@ -381,7 +382,7 @@ function TemplatesSection() {
               New template
             </Button>
           )}
-        </>
+        </Disclosure>
       )}
     </Card>
   )
@@ -414,8 +415,7 @@ function GradingSection() {
   const setSeverity = (id, severity) => update(flags.map(f => (f.id === id ? { ...f, severity } : f)))
   const removeFlag  = id             => update(flags.filter(f => f.id !== id))
 
-  const kitchen    = (flags ?? []).filter(f => f.scope === 'kitchen')
-  const individual = (flags ?? []).filter(f => f.scope === 'individual')
+  const { kitchen, individual } = flagIndex(flags ?? [])
 
   return (
     <Card className="space-y-5">
@@ -442,8 +442,8 @@ function GradingSection() {
         <Skeleton height="8rem" />
       ) : (
         <>
-          <div className="space-y-2">
-            <FieldLabel>Kitchen flags — apply to everyone in the kitchen</FieldLabel>
+          <Disclosure title="Kitchen flags" count={kitchen.length} defaultOpen={kitchen.length <= 5}>
+            <FieldLabel>Apply to everyone in the kitchen</FieldLabel>
             <div className="space-y-2">
               {kitchen.map(f => (
                 <div key={f.id} className="flex items-center gap-2">
@@ -462,10 +462,10 @@ function GradingSection() {
               {kitchen.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No kitchen flags yet.</p>}
             </div>
             <Button variant="secondary" size="sm" onClick={() => addFlag('kitchen')}>Add kitchen flag</Button>
-          </div>
+          </Disclosure>
 
-          <div className="space-y-2">
-            <FieldLabel>Individual flags — apply to one student (Minor drops one tier, Major two)</FieldLabel>
+          <Disclosure title="Individual flags" count={individual.length} defaultOpen={individual.length <= 5}>
+            <FieldLabel>Apply to one student (Minor drops one tier, Major two)</FieldLabel>
             <div className="space-y-2">
               {individual.map(f => (
                 <div key={f.id} className="flex items-center gap-2">
@@ -484,7 +484,7 @@ function GradingSection() {
               {individual.length === 0 && <p className="text-xs text-[var(--color-text-muted)]">No individual flags yet.</p>}
             </div>
             <Button variant="secondary" size="sm" onClick={() => addFlag('individual')}>Add individual flag</Button>
-          </div>
+          </Disclosure>
 
           <button
             onClick={() => update(DEFAULT_FLAGS.map(f => ({ ...f })))}
