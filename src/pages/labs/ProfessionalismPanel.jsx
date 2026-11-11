@@ -183,14 +183,15 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
         const journalOverride = journalOverrides.find(o => o.courseSectionId === sectionId)
         if (journalOverride) await deleteOverride(courseId, entry.journalAssignmentId, journalOverride.id)
       }
+      let updated
       if (entry.dates?.[sectionId] !== undefined || entry.closeDates?.[sectionId] !== undefined) {
         const dates = { ...entry.dates }; delete dates[sectionId]
         const closeDates = { ...entry.closeDates }; delete closeDates[sectionId]
-        await saveLab({ id: entry.id, dates, closeDates })
+        updated = await saveLab({ id: entry.id, dates, closeDates })
       }
       toast(`Removed ${sec?.name ?? 'the period'} from "${professionalism?.name ?? entry.name}".`, 'success')
       await loadOverrides()
-      onAdded?.()
+      onAdded?.(updated)
     } catch (err) {
       toast(`Could not remove ${sec?.name ?? 'the period'}: ${err.message}`, 'error')
     } finally {
@@ -219,11 +220,11 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
         if (journalOverride) await updateOverride(courseId, entry.journalAssignmentId, journalOverride.id, journalFields)
         else await createOverride(courseId, entry.journalAssignmentId, journalFields)
       }
-      await saveLab({ id: entry.id, dates: { ...entry.dates, [sectionId]: editSectionDate } })
+      const updated = await saveLab({ id: entry.id, dates: { ...entry.dates, [sectionId]: editSectionDate } })
       toast(`Updated ${sec?.name ?? 'the period'}'s lab date.`, 'success')
       setEditingSectionId(null)
       await loadOverrides()
-      onAdded?.()
+      onAdded?.(updated)
     } catch (err) {
       toast(`Could not update ${sec?.name ?? 'the period'}: ${err.message}`, 'error')
     } finally {
@@ -616,7 +617,7 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
   )
 }
 
-export default function ProfessionalismPanel({ courseId, courseName, loadingCourse, ready, setupVersion, onChanged, onLabCreated, onLabRemoved, onGoToSetup }) {
+export default function ProfessionalismPanel({ courseId, courseName, loadingCourse, ready, active = true, setupVersion, onChanged, onLabCreated, onLabRemoved, onGoToSetup }) {
   const toast = useToast()
   // Which form is open above the list: 'create', 'link', or null (list only).
   // With nothing tracked yet the create form shows on its own.
@@ -631,6 +632,11 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [entries, setEntries]         = useState([])
   const [courseSetup, setCourseSetup] = useState(null)
   const [templates, setTemplates]     = useState([])
+  // Shown again after something changed while hidden: reload (see ScoringPanel's
+  // same active/dataVersion/loadedVersion shape). A background tab no longer
+  // eagerly re-fetches the instant a sibling panel bumps setupVersion.
+  const [reloadTick, setReloadTick]   = useState(0)
+  const loadedVersion                 = useRef(setupVersion)
 
   // Create-new form state
   const [name, setName]               = useState('')
@@ -659,9 +665,15 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [bulkProgress, setBulkProgress]     = useState(null) // "3 of 6" while linking
   const [showUnpublished, setShowUnpublished] = useState(false)
 
+  // Shown again (or still active) after setupVersion moved on without us: reload.
+  useEffect(() => {
+    if (active && loadedVersion.current !== setupVersion) setReloadTick(t => t + 1)
+  }, [active, setupVersion])
+
   useEffect(() => {
     if (!courseId) { setSections([]); setAssignments([]); setModules([]); setEntries([]); setCourseSetup(null); return }
     setLoading(true)
+    loadedVersion.current = setupVersion
     // This tab only cares about two kinds of assignment: lab journals (title has
     // "lab") and professionalism scores (title has "professionalism"). Fetch just
     // those two scoped sets server-side instead of every assignment in the course,
@@ -689,7 +701,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
         setTemplates(tmpls)
       })
       .finally(() => setLoading(false))
-  }, [courseId, setupVersion])
+  }, [courseId, reloadTick])
 
   // Prefill each section's lab date from the A/B-day quick-set fields, unless
   // the teacher has edited that section's date directly this session.
@@ -1026,6 +1038,18 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const labJournalOptions = journalCandidates.filter(a => a.published && likelyJournal(a))
   const otherJournalOptions = showAllJournals ? journalCandidates.filter(a => !labJournalOptions.includes(a)) : []
 
+  // A period's add/remove/date-edit inside an EntryRow: merge the already-known
+  // result straight into our own `entries` (same local-merge pattern as
+  // performCreate/linkOne above), then bump setupVersion for the other panels
+  // but mark ourselves already caught up to it — otherwise our own lazy-reload
+  // effect above would immediately refetch and re-skeleton the list we just
+  // updated in place. See DECISIONS.md / the reload-flash investigation.
+  function handleRowChanged(updatedEntry) {
+    if (updatedEntry) setEntries(prev => prev.map(e => (e.id === updatedEntry.id ? updatedEntry : e)))
+    const newVersion = onChanged?.()
+    if (newVersion != null) loadedVersion.current = newVersion
+  }
+
   function handleRemoved(entry, deletedFromCanvas) {
     setEntries(prev => prev.filter(e => e.id !== entry.id))
     if (deletedFromCanvas) setAssignments(prev => prev.filter(a => a.id !== entry.professionalismAssignmentId))
@@ -1294,7 +1318,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       {entries.length > 0 && (
         <Card>
           <EntryList entries={entries} assignments={assignments} modules={modules} courseId={courseId} sections={sections}
-            courseSetup={courseSetup} onAdded={onChanged} onRemove={setRemoving} onEdit={setEditing} />
+            courseSetup={courseSetup} onAdded={handleRowChanged} onRemove={setRemoving} onEdit={setEditing} />
         </Card>
       )}
 

@@ -37,7 +37,7 @@ const KITCHEN_COUNT = 8
 const EMPTY = []
 
 export default function KitchenScorePanel({
-  courseId, courseName, loadingCourse, ready, setupVersion,
+  courseId, courseName, loadingCourse, ready, active = true, setupVersion,
   labId, sectionId, onSelect, onChanged, onGoToSetup, onGoToLabs,
 }) {
   const toast = useToast()
@@ -75,19 +75,31 @@ export default function KitchenScorePanel({
   const autosaveTimer = useRef(null)
   const autoPicked = useRef(false) // today's lab is picked once per launch, not on every reload
   const [reloadTick, setReloadTick]   = useState(0) // bumped by "Try again" after a failed load
+  // Course-level data's own reload trigger, separate from reloadTick above
+  // (that one's for retrying this period's roster/scores). Same active/
+  // loadedVersion shape as ScoringPanel/ProfessionalismPanel: a background tab
+  // no longer eagerly re-fetches the instant a sibling panel bumps setupVersion.
+  const [courseReloadTick, setCourseReloadTick] = useState(0)
+  const loadedVersion = useRef(setupVersion)
 
   const entry = entries.find(e => e.id === labId) ?? null
+
+  // Shown again (or still active) after setupVersion moved on without us: reload.
+  useEffect(() => {
+    if (active && loadedVersion.current !== setupVersion) setCourseReloadTick(t => t + 1)
+  }, [active, setupVersion])
 
   // --- course-level loads ---
   useEffect(() => {
     if (!courseId) { setEntries([]); setSections([]); setCourseSetup(null); return }
     setLoading(true)
+    loadedVersion.current = setupVersion
     // getFlags is global (not course-scoped) but is cheap and lives here so the
     // picker/scoring always see the teacher's latest edits on a course switch.
     Promise.all([getLabs(courseId), getSections(courseId), getCourseSetup(courseId), getFlags(), getCommentBank()])
       .then(([labs, secs, setup, f, bank]) => { setEntries(labs); setSections(secs); setCourseSetup(setup); setFlags(f); setCommentLibrary(bank) })
       .finally(() => setLoading(false))
-  }, [courseId, setupVersion])
+  }, [courseId, courseReloadTick])
 
   // --- open on today's lab ---
   // Once the course's labs load: if a lab is dated today and the remembered

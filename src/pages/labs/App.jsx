@@ -74,6 +74,7 @@ export default function App({ initialCourseId }) {
   useEffect(() => { setVisited(v => (v.has(tab) ? v : new Set([...v, tab]))) }, [tab])
   const [courseSetup, setCourseSetup]       = useState(null)
   const [setupVersion, setSetupVersion]     = useState(0)
+  const setupVersionRef                     = useRef(0)
   const [showBootstrap, setShowBootstrap]   = useState(false)
   const [showCourseSettings, setShowCourseSettings] = useState(false)
   const routedCourseId = useRef(null)
@@ -149,9 +150,14 @@ export default function App({ initialCourseId }) {
 
   // Bumped whenever setup changes (new group/section/term/entry) so panels
   // depending on it (Professionalism, Attendance, Scoring, this course's own
-  // courseSetup fetch above) refetch.
+  // courseSetup fetch above) refetch. Returns the new version synchronously so
+  // a caller that already applied the change locally (see ProfessionalismPanel's
+  // handleRowChanged) can mark itself caught-up instead of refetching its own
+  // edit back from Canvas.
   function refreshSetup() {
-    setSetupVersion(v => v + 1)
+    setupVersionRef.current += 1
+    setSetupVersion(setupVersionRef.current)
+    return setupVersionRef.current
   }
 
   const course = courses.find(c => c.id === courseId) ?? null
@@ -179,6 +185,7 @@ export default function App({ initialCourseId }) {
                 courseName={course?.name}
                 loadingCourse={loadingCourses}
                 ready={ready}
+                active={tab === 'labs'}
                 setupVersion={setupVersion}
                 onChanged={refreshSetup}
                 onLabCreated={handleLabCreated}
@@ -192,6 +199,7 @@ export default function App({ initialCourseId }) {
                 courseName={course?.name}
                 loadingCourse={loadingCourses}
                 ready={ready}
+                active={tab === 'lab'}
                 setupVersion={setupVersion}
                 labId={labId}
                 sectionId={sectionId}
