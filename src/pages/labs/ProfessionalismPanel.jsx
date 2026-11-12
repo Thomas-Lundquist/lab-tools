@@ -13,13 +13,15 @@ import { usePinGate } from '../../security/usePinGate.jsx'
 import { getSections } from '../../api/sections.js'
 import { getAssignments, createAssignment, deleteAssignment } from '../../api/assignments.js'
 import { getAssignmentSubmissions } from '../../api/submissions.js'
+import { getEnrollments } from '../../api/enrollments.js'
 import { NotFoundError } from '../../api/errors.js'
 import { createOverride, updateOverride, deleteOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
 import { getCourseSetup, getLabs, saveLab, deleteLab, isStandalone, getTemplates } from '../../storage/setup.js'
 import { clearAllLabGrading, getAllLabGrading } from '../../storage/labGrading.js'
+import { mapLimit } from '../../utils/mapLimit.js'
 import { loadJournalUndo, runJournalUndo } from './labRemoval.js'
-import { isProfessionalismAssignment } from './scoring.js'
+import { isProfessionalismAssignment, journalGradedGaps } from './scoring.js'
 import {
   STANDALONE, JournalSelect, ModulePicker, SCOPE_OPTIONS, sectionsInScope, inferScope,
   professionalismOverrideDates, journalOverrideDates,
@@ -37,6 +39,8 @@ import EditLabModal from './EditLabModal.jsx'
 function normalizeTitle(title) {
   return title.trim().toLowerCase()
 }
+
+const toSubMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
 
 // Every assignment already in the course whose title collides with `title`.
 // Canvas permits identical titles and does nothing to stop a second copy, so
@@ -100,7 +104,7 @@ function SectionDatesAccordion({ sections, dates, onChange }) {
 // has none to show. Each row can also take a new section (with its own due
 // date) after the fact: an assignment first created for just the A-day or B-day
 // sections gets extended to another section here, once that date is known.
-function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove, onEdit }) {
+function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup, journalGap, onAdded, onRemove, onEdit }) {
   const toast = useToast()
   const mod = modules.find(m => m.id === entry.moduleId)
   const journal = assignments.find(a => a.id === entry.journalAssignmentId)
@@ -257,6 +261,15 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
               </span>
             )}
           </div>
+          {journalGap?.length > 0 && (
+            <div className="flex items-start gap-1 text-xs text-[var(--color-warning)]">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>
+                {journalGap.length} graded journal{journalGap.length === 1 ? '' : 's'}, no professionalism score yet:{' '}
+                {journalGap.slice(0, 4).map(g => g.userName).join(', ')}{journalGap.length > 4 ? `, +${journalGap.length - 4} more` : ''}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {sections.length > 0 && assignmentId && (
@@ -408,7 +421,7 @@ function fmtLabDates(entry) {
 
 // The tracked assignments as one list, newest lab first, with a search and a
 // Unit filter so a full year stays usable. Scrolls inside its card.
-function EntryList({ entries, assignments, modules, courseId, sections, courseSetup, onAdded, onRemove, onEdit }) {
+function EntryList({ entries, assignments, modules, courseId, sections, courseSetup, journalGaps, onAdded, onRemove, onEdit }) {
   const [query, setQuery]   = useState('')
   const [unitId, setUnitId] = useState('')
   const q = query.trim().toLowerCase()
@@ -449,6 +462,7 @@ function EntryList({ entries, assignments, modules, courseId, sections, courseSe
               courseId={courseId}
               sections={sections}
               courseSetup={courseSetup}
+              journalGap={journalGaps?.[entry.id]}
               onAdded={onAdded}
               onRemove={onRemove}
               onEdit={onEdit}
@@ -632,6 +646,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
   const [entries, setEntries]         = useState([])
   const [courseSetup, setCourseSetup] = useState(null)
   const [templates, setTemplates]     = useState([])
+  const [journalGaps, setJournalGaps] = useState({}) // entry.id -> [{ userId, userName }]
   // Shown again after something changed while hidden: reload (see ScoringPanel's
   // same active/dataVersion/loadedVersion shape). A background tab no longer
   // eagerly re-fetches the instant a sibling panel bumps setupVersion.
@@ -702,6 +717,33 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       })
       .finally(() => setLoading(false))
   }, [courseId, reloadTick])
+
+  // Background check, after the list itself has loaded: for each Pairing, has
+  // its journal been graded for a student whose professionalism score is
+  // still blank? That's a sign grading was simply never finished for them,
+  // not that nothing happened that day — easy to miss once a lab's day has
+  // passed and nothing draws you back to it. Runs lazily so it never blocks
+  // the list from showing; badges fill in once it's done.
+  useEffect(() => {
+    if (!courseId || entries.length === 0) { setJournalGaps({}); return }
+    const publishedIds = new Set(assignments.filter(a => a.published).map(a => a.id))
+    const checkable = entries.filter(e => !isStandalone(e) && publishedIds.has(e.journalAssignmentId) && publishedIds.has(e.professionalismAssignmentId))
+    if (checkable.length === 0) { setJournalGaps({}); return }
+    let cancelled = false
+    ;(async () => {
+      const enrollments = await getEnrollments(courseId).catch(() => [])
+      const nameById = Object.fromEntries(enrollments.map(e => [e.userId, e.userName]))
+      const results = await mapLimit(checkable, 4, async entry => {
+        const [journalSubs, profSubs] = await Promise.all([
+          getAssignmentSubmissions(courseId, entry.journalAssignmentId).then(toSubMap),
+          getAssignmentSubmissions(courseId, entry.professionalismAssignmentId).then(toSubMap),
+        ])
+        return [entry.id, journalGradedGaps(profSubs, journalSubs).map(userId => ({ userId, userName: nameById[userId] ?? userId }))]
+      })
+      if (!cancelled) setJournalGaps(Object.fromEntries(results.filter(([, gap]) => gap.length > 0)))
+    })()
+    return () => { cancelled = true }
+  }, [courseId, entries, assignments])
 
   // Prefill each section's lab date from the A/B-day quick-set fields, unless
   // the teacher has edited that section's date directly this session.
@@ -1318,7 +1360,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       {entries.length > 0 && (
         <Card>
           <EntryList entries={entries} assignments={assignments} modules={modules} courseId={courseId} sections={sections}
-            courseSetup={courseSetup} onAdded={handleRowChanged} onRemove={setRemoving} onEdit={setEditing} />
+            courseSetup={courseSetup} journalGaps={journalGaps} onAdded={handleRowChanged} onRemove={setRemoving} onEdit={setEditing} />
         </Card>
       )}
 

@@ -1,6 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { scoreStudent, scoreFromDeductions, isUnitScore, isProfessionalismAssignment } from './scoring.js'
+import { scoreStudent, scoreTermStudent, journalGapCount, journalGradedGaps, scoreFromDeductions, isUnitScore, isProfessionalismAssignment } from './scoring.js'
+
+// unitScores: array of unit averages (number|null), in Term order.
+function term(unitScores) {
+  const results = unitScores.map((value, i) => ({ name: `Unit ${i + 1}`, result: { value } }))
+  return scoreTermStudent(results).value
+}
 
 // labs: array of { score, points? } — score is a number, null (blank/ungraded),
 // or 'EX' (excused). points defaults to 4 (the common case in the table).
@@ -75,6 +81,53 @@ test('deductions: never goes below 0', () => {
 test('deductions: custom step sizes', () => {
   assert.equal(scoreFromDeductions(1, { pointsPerStep: 2, marksPerStep: 1 }), 2)
   assert.equal(scoreFromDeductions(2, { pointsPerStep: 2, marksPerStep: 1 }), 0)
+})
+
+// A Term averages its Units' own scores, not a pooled average of every lab
+// (DECISIONS.md, 2026-11-12) — so a Unit counts the same whether it had 3
+// labs or 8.
+test('a Term averages Unit scores, not labs — a thin Unit and a deep Unit count the same', () => {
+  // Unit A: 3 labs, one a 0 -> average 2.67. Unit B: 8 labs, all 4s -> average 4.
+  assert.equal(term([2.67, 4]), 3.34)
+})
+
+test('a Unit with no score yet is left out of the Term, not counted as 0', () => {
+  assert.equal(term([4, null]), 4)
+})
+
+test('a Term with no Unit scores yet has no score', () => {
+  assert.equal(term([null, null]), null)
+})
+
+// A lab's journal already graded, professionalism still blank: a sign grading
+// was simply never finished, not that nothing happened that day.
+test('journalGapCount flags a graded journal with a still-blank professionalism score', () => {
+  const labs = [{ id: 'p1', journalAssignmentId: 'j1' }]
+  const subs = { j1: { score: 10, excused: false } }
+  assert.equal(journalGapCount(subs, labs), 1)
+})
+
+test('journalGapCount does not flag a lab once professionalism is scored', () => {
+  const labs = [{ id: 'p1', journalAssignmentId: 'j1' }]
+  const subs = { j1: { score: 10, excused: false }, p1: { score: 3, excused: false } }
+  assert.equal(journalGapCount(subs, labs), 0)
+})
+
+test('journalGapCount does not flag a lab whose journal is still blank', () => {
+  const labs = [{ id: 'p1', journalAssignmentId: 'j1' }]
+  const subs = {}
+  assert.equal(journalGapCount(subs, labs), 0)
+})
+
+test('journalGapCount skips standalone labs (no journal)', () => {
+  const labs = [{ id: 'p1', journalAssignmentId: null }]
+  assert.equal(journalGapCount({}, labs), 0)
+})
+
+test('journalGradedGaps finds the gap directly from two submission maps', () => {
+  const journalSubs = { s1: { score: 10, excused: false }, s2: { score: null, excused: false } }
+  const profSubs = { s1: { score: null, excused: false } }
+  assert.deepEqual(journalGradedGaps(profSubs, journalSubs), ['s1'])
 })
 
 // isUnitScore / isProfessionalismAssignment — must never both match the same assignment name.

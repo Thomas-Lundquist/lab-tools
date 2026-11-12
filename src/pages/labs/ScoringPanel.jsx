@@ -19,7 +19,8 @@ import { getEnrollments } from '../../api/enrollments.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
 import { getCourseSetup, getLabs, getTerms, saveTerm, deleteTerm } from '../../storage/setup.js'
 import { getRollups, recordPush, recordPushRevert } from '../../storage/rollups.js'
-import { scoreGroup, columnText, fmt, isProfessionalismAssignment, isScoreAssignment } from './scoring.js'
+import { mapLimit } from '../../utils/mapLimit.js'
+import { scoreGroup, scoreTermGroup, journalGapGroup, columnText, fmt, isProfessionalismAssignment, isScoreAssignment } from './scoring.js'
 import { planPush, groupStatus, planPushRevert, runPush, runPushRevert, postedAfterPush } from './rollupPush.js'
 
 // Scoring tab: Unit scores (each Module's labs) and Term scores (every lab in
@@ -31,19 +32,6 @@ import { planPush, groupStatus, planPushRevert, runPush, runPushRevert, postedAf
 const UNIT_SUFFIX = 'Professionalism (Unit Score)'
 const TERM_SUFFIX = 'Professionalism (Term Score)'
 const norm = s => (s ?? '').trim().toLowerCase()
-// Runs fn over items with at most `limit` in flight, keeping order.
-async function mapLimit(items, limit, fn) {
-  const out = new Array(items.length)
-  let next = 0
-  async function worker() {
-    while (next < items.length) {
-      const i = next++
-      out[i] = await fn(items[i])
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return out
-}
 
 const toMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
 
@@ -91,11 +79,17 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
           getCourseSetup(courseId),
           getRollups(courseId),
         ])
-        // Submissions only for the labs and the Unit/Term score assignments, and
-        // only published ones: Canvas refuses the whole request ("invalid
-        // assignment ids", 403) if any id in it is unpublished. Unpublished
-        // assignments can't hold grades anyway.
-        const relevantIds = asns.filter(a => a.published && (isProfessionalismAssignment(a.name) || isScoreAssignment(a.name))).map(a => a.id)
+        // Submissions for the labs, the Unit/Term score assignments, and each
+        // lab's paired journal (for the "journal graded, professionalism still
+        // blank" check below) — only published ones: Canvas refuses the whole
+        // request ("invalid assignment ids", 403) if any id in it is
+        // unpublished. Unpublished assignments can't hold grades anyway.
+        const publishedIds = new Set(asns.filter(a => a.published).map(a => a.id))
+        const journalIds = [...new Set(entryList.map(e => e.journalAssignmentId).filter(id => id && publishedIds.has(id)))]
+        const relevantIds = [...new Set([
+          ...asns.filter(a => a.published && (isProfessionalismAssignment(a.name) || isScoreAssignment(a.name))).map(a => a.id),
+          ...journalIds,
+        ])]
         // One request per assignment, six at a time. The course-wide endpoint
         // pages through every submission one page after another, which took
         // most of a minute on a real course.
@@ -147,7 +141,10 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
   const entryByAssignment = useMemo(() => Object.fromEntries(entries.map(e => [e.professionalismAssignmentId, e])), [entries])
   const labs = useMemo(() => assignments
     .filter(a => a.published && isProfessionalismAssignment(a.name))
-    .map(a => ({ id: a.id, name: a.name, pointsPossible: a.pointsPossible, entry: entryByAssignment[a.id] ?? null, moduleId: entryByAssignment[a.id]?.moduleId ?? null })),
+    .map(a => ({
+      id: a.id, name: a.name, pointsPossible: a.pointsPossible, entry: entryByAssignment[a.id] ?? null,
+      moduleId: entryByAssignment[a.id]?.moduleId ?? null, journalAssignmentId: entryByAssignment[a.id]?.journalAssignmentId ?? null,
+    })),
   [assignments, entryByAssignment])
   const unassignedLabs = labs.filter(l => !l.moduleId || !modules.some(m => m.id === l.moduleId))
   const untrackedCount = unassignedLabs.filter(l => !l.entry).length
@@ -159,11 +156,17 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
     .filter(u => u.labs.length > 0),
   [modules, labs])
 
+  // A Term's own score comes from its Units (scoreTermGroup), so each Unit
+  // counts the same in the Term regardless of its lab count (DECISIONS.md,
+  // 2026-11-12). `labs` here is still the flat list for the per-lab columns,
+  // progress chips, and "graded in any period" checks below, which stay
+  // lab-level regardless of how the Term's own score is computed.
   const termGroups = useMemo(() => terms.map(t => ({
     key: t.id, name: t.name, moduleId: null,
     labs: labs.filter(l => l.moduleId && t.moduleIds.includes(l.moduleId)),
+    units: units.filter(u => t.moduleIds.includes(u.moduleId)),
     title: `${t.name} ${TERM_SUFFIX}`,
-  })), [terms, labs])
+  })), [terms, labs, units])
 
   function handleAssignmentCreated(created) {
     setAssignments(prev => [...prev, created])
@@ -206,8 +209,8 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
     <div className="space-y-8">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-[var(--color-text-muted)]">
-          A Unit score is the average of its labs; a Term score is the average of every lab in its Units, so each lab counts the same.
-          Nothing is dropped. Excused labs don&rsquo;t count, and blank ones are noted.
+          A Unit score is the average of its labs; a Term score is the average of its Units&rsquo; own scores, so each Unit counts
+          the same no matter how many labs it has. Nothing is dropped. Excused labs don&rsquo;t count, and blank ones are noted.
         </p>
         <Button variant="ghost" size="sm" icon={RefreshCw} onClick={() => setReloadTick(t => t + 1)}>Refresh</Button>
       </div>
@@ -227,7 +230,7 @@ export default function ScoringPanel({ courseId, courseName, loadingCourse, acti
 
       <div className="space-y-3">
         <RollupLevel level="Term" groups={termGroups} {...shared}
-          empty="Add a Term below and choose its Modules. Its score averages every lab in those Units." />
+          empty="Add a Term below and choose its Modules. Its score averages those Units' own scores." />
         <TermsEditor courseId={courseId} terms={terms} setTerms={setTerms} modules={modules} />
       </div>
     </div>
@@ -251,7 +254,7 @@ function RollupLevel({ level, groups, empty, students, submissionsByStudent, fin
   const [activeKey, setActiveKey] = useState(null)
 
   const computed = useMemo(() => groups.map(g => {
-    const results = scoreGroup(students, g.labs, submissionsByStudent)
+    const results = g.units ? scoreTermGroup(students, g.units, submissionsByStudent) : scoreGroup(students, g.labs, submissionsByStudent)
     const target = findAssignment(g.title)
     const canvas = target ? Object.fromEntries(students.map(s => [s.userId, submissionsByStudent[s.userId]?.[target.id]]).filter(([, v]) => v)) : {}
     return { ...g, results, target, canvas, status: groupStatus({ exists: !!target, students, results, canvas }) }
@@ -341,6 +344,15 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
   const visibleRows = sectionFilter ? rows.filter(x => x.student.sectionId === sectionFilter) : rows
   const sectionOptions = sections.filter(s => s.studentIds.length && (!coveredIds.size || coveredIds.has(s.id))).map(s => ({ value: s.id, label: s.name }))
   const scoredCount = rows.filter(x => x.r.value != null).length
+  // An unresolved absence: a lab counted as a 0 (not excused, not a makeup
+  // yet — see scoring.js's `missed`). Not a push blocker, just a nudge to
+  // check whether a makeup is still owed before the zero gets locked in and
+  // shown to the student.
+  const unresolvedRows = rows.filter(x => x.r.missed > 0)
+  // A lab's journal already graded, professionalism still blank — grading was
+  // simply never finished for that student, not that nothing happened.
+  const journalGapCounts = useMemo(() => journalGapGroup(students, group.labs, submissionsByStudent), [students, group.labs, submissionsByStudent])
+  const journalGapRows = students.map((student, i) => ({ student, gap: journalGapCounts[i] })).filter(x => x.gap > 0)
   const names = Object.fromEntries(students.map(s => [s.userId, s.userName]))
 
   const buildPlan = (canvas, ow) => planPush({ students, results, canvas, posted: tracked?.posted ?? null, overwrite: ow })
@@ -499,6 +511,19 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
           {partly.length} lab{partly.length === 1 ? ' isn’t' : 's aren’t'} graded in every period yet. Students in those periods are averaged without {partly.length === 1 ? 'it' : 'them'} for now.
         </p>
       )}
+      {unresolvedRows.length > 0 && (
+        <Callout tone="warning">
+          {unresolvedRows.length} student{unresolvedRows.length === 1 ? '' : 's'} still {unresolvedRows.length === 1 ? 'has' : 'have'} an unresolved absence
+          (a lab scored 0, not excused) in this {level}. Check whether a makeup is still owed before pushing — a makeup replaces the 0 the moment it's entered.
+        </Callout>
+      )}
+      {journalGapRows.length > 0 && (
+        <Callout tone="warning">
+          {journalGapRows.length} student{journalGapRows.length === 1 ? '' : 's'} {journalGapRows.length === 1 ? 'has' : 'have'} a graded journal but no
+          professionalism score yet, on a lab in this {level}: {journalGapRows.slice(0, 6).map(x => x.student.userName).join(', ')}
+          {journalGapRows.length > 6 ? `, +${journalGapRows.length - 6} more` : ''}.
+        </Callout>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button icon={Send} onClick={openPush} disabled={!scoredCount || blocked}>Push to Canvas…</Button>
@@ -582,6 +607,7 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
           </>}
         >
           <PushPreview pushing={pushing} target={target} title={title} group={group}
+            unresolvedCount={unresolvedRows.length} journalGapCount={journalGapRows.length}
             onToggle={id => toggle([id])} onToggleAll={on => toggle(pushing.plan.students.filter(r => r.outside.length).map(r => r.userId), on)} />
           {busy && progress && <p className="text-xs text-[var(--color-text-muted)] mt-2">{progress}</p>}
         </Modal>
@@ -619,7 +645,7 @@ function GroupDetail({ level, group, students, sections, submissionsByStudent, r
   )
 }
 
-function PushPreview({ pushing, target, title, group, onToggle, onToggleAll }) {
+function PushPreview({ pushing, target, title, group, unresolvedCount = 0, journalGapCount = 0, onToggle, onToggleAll }) {
   if (pushing.error) return <p className="text-sm text-[var(--color-error)]">Couldn&rsquo;t read Canvas to build the preview: {pushing.error}</p>
   if (!pushing.plan) return <p className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]"><Loader size={14} className="animate-spin" />Checking Canvas…</p>
   const { students, summary } = pushing.plan
@@ -629,6 +655,12 @@ function PushPreview({ pushing, target, title, group, onToggle, onToggleAll }) {
       {!target && (
         <p className="text-[var(--color-text-body)]">
           Creates &ldquo;{title}&rdquo; (4 points) in the Professionalism group{group.moduleId ? ' and this Unit’s Module' : ''} first.
+        </p>
+      )}
+      {(unresolvedCount > 0 || journalGapCount > 0) && (
+        <p className="text-[var(--color-warning)]">
+          {unresolvedCount > 0 && <>{unresolvedCount} student{unresolvedCount === 1 ? '' : 's'} still {unresolvedCount === 1 ? 'has' : 'have'} an unresolved absence here. </>}
+          {journalGapCount > 0 && <>{journalGapCount} student{journalGapCount === 1 ? '' : 's'} {journalGapCount === 1 ? 'has' : 'have'} a graded journal but no professionalism score yet.</>}
         </p>
       )}
       {summary.writes === 0 ? (
