@@ -13,7 +13,6 @@ import { usePinGate } from '../../security/usePinGate.jsx'
 import { getSections } from '../../api/sections.js'
 import { getAssignments, createAssignment, deleteAssignment } from '../../api/assignments.js'
 import { getAssignmentSubmissions } from '../../api/submissions.js'
-import { getEnrollments } from '../../api/enrollments.js'
 import { NotFoundError } from '../../api/errors.js'
 import { createOverride, updateOverride, deleteOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
@@ -40,7 +39,12 @@ function normalizeTitle(title) {
   return title.trim().toLowerCase()
 }
 
-const toSubMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused }]))
+// userName comes straight off the submission itself (Canvas includes it via
+// include[]=user on every getAssignmentSubmissions call) — not from a
+// separate active-enrollment roster lookup, which misses anyone not in
+// state 'active' (a concluded enrollment, Test Student, etc.) and would
+// otherwise show their raw Canvas user id instead of a name.
+const toSubMap = subs => Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused, userName: s.userName }]))
 
 // Every assignment already in the course whose title collides with `title`.
 // Canvas permits identical titles and does nothing to stop a second copy, so
@@ -731,14 +735,12 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     if (checkable.length === 0) { setJournalGaps({}); return }
     let cancelled = false
     ;(async () => {
-      const enrollments = await getEnrollments(courseId).catch(() => [])
-      const nameById = Object.fromEntries(enrollments.map(e => [e.userId, e.userName]))
       const results = await mapLimit(checkable, 4, async entry => {
         const [journalSubs, profSubs] = await Promise.all([
           getAssignmentSubmissions(courseId, entry.journalAssignmentId).then(toSubMap),
           getAssignmentSubmissions(courseId, entry.professionalismAssignmentId).then(toSubMap),
         ])
-        return [entry.id, journalGradedGaps(profSubs, journalSubs).map(userId => ({ userId, userName: nameById[userId] ?? userId }))]
+        return [entry.id, journalGradedGaps(profSubs, journalSubs).map(userId => ({ userId, userName: journalSubs[userId]?.userName ?? `Student ${userId}` }))]
       })
       if (!cancelled) setJournalGaps(Object.fromEntries(results.filter(([, gap]) => gap.length > 0)))
     })()
