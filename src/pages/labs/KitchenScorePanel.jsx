@@ -638,7 +638,7 @@ export default function KitchenScorePanel({
                       <p className="text-xs text-[var(--color-text-muted)] py-2">No students assigned. Use the kitchen picker below.</p>
                     )}
                     {members.map(s => (
-                      <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
+                      <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]} canvas={profState[s.userId]}
                         kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
                         flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                     ))}
@@ -656,7 +656,7 @@ export default function KitchenScorePanel({
               </div>
               <div className="px-4 py-2 divide-y divide-[var(--color-border-subtle)]">
                 {unassigned.map(s => (
-                  <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]}
+                  <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]} canvas={profState[s.userId]}
                     kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
                     flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                 ))}
@@ -743,9 +743,26 @@ export default function KitchenScorePanel({
 // expands the controls, so a long roster stays clean until a student needs edits.
 // The controls live in a display:contents wrapper so they lay out inline in the
 // row on md+ (md:contents) and only hide on a collapsed phone — no duplicate markup.
-function StudentRowBase({ student, section, score, kitchenCount, commentLibrary = [], maxScore = 4, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
+// What Canvas currently holds for this student, if it disagrees with what's
+// about to be shown/posted — null when they already match, or when Canvas
+// has nothing yet (an ungraded lab isn't a conflict, just not graded yet).
+// Catches a professionalism assignment graded by hand or outside Lab Tools
+// (an old/linked assignment Lab Tools never committed): without this, the
+// badge only ever showed the locally-derived score, which for an untouched
+// period defaults to a clean kitchen — not what Canvas actually has.
+function canvasMismatch(st, score, canvas) {
+  if (!canvas || (!canvas.excused && canvas.score == null)) return null
+  const absent = st.present === false
+  const matches = absent
+    ? (st.excused ? canvas.excused : (!canvas.excused && Number(canvas.score) === 0))
+    : (!canvas.excused && canvas.score != null && Number(canvas.score) === score)
+  return matches ? null : (canvas.excused ? 'Excused' : String(canvas.score))
+}
+
+function StudentRowBase({ student, section, score, canvas, kitchenCount, commentLibrary = [], maxScore = 4, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
+  const mismatch = canvasMismatch(st, score, canvas)
   const [open, setOpen] = useState(false)
   const [commentOpen, setCommentOpen] = useState(false)   // big write modal (Apple Pencil / large screen)
   const [libraryOpen, setLibraryOpen] = useState(false)   // comment-library picker modal
@@ -783,6 +800,14 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
         <span className={`inline-flex items-center justify-center w-10 h-7 shrink-0 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
+        {mismatch && (
+          <span
+            className="shrink-0 text-xs font-medium px-1.5 py-0.5 rounded-full border border-[var(--color-warning)] text-[var(--color-warning)] whitespace-nowrap"
+            title="Canvas currently holds this, not entered through Lab Tools. Committing will ask before changing it."
+          >
+            Canvas: {mismatch}
+          </span>
+        )}
         <AttendanceSwitch absent={absent} name={student.userName}
           onToggle={() => onApply(s => setPresent(s, student.userId, absent))} />
         {/* Collapsed-on-phone hint that flags exist underneath. */}
@@ -908,6 +933,7 @@ function StudentRowBase({ student, section, score, kitchenCount, commentLibrary 
 // reflects this student's kitchen flags, so comparing it covers kitchen changes.
 function studentRowEqual(prev, next) {
   return prev.score === next.score
+    && prev.canvas === next.canvas
     && prev.kitchenCount === next.kitchenCount
     && prev.maxScore === next.maxScore
     && prev.commentLibrary === next.commentLibrary

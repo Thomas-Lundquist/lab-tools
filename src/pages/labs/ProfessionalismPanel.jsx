@@ -13,6 +13,7 @@ import { usePinGate } from '../../security/usePinGate.jsx'
 import { getSections } from '../../api/sections.js'
 import { getAssignments, createAssignment, deleteAssignment } from '../../api/assignments.js'
 import { getAssignmentSubmissions } from '../../api/submissions.js'
+import { getEnrollments } from '../../api/enrollments.js'
 import { NotFoundError } from '../../api/errors.js'
 import { createOverride, updateOverride, deleteOverride, getOverrides } from '../../api/overrides.js'
 import { getModules, ensureModuleItem } from '../../api/modules.js'
@@ -735,12 +736,18 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     if (checkable.length === 0) { setJournalGaps({}); return }
     let cancelled = false
     ;(async () => {
+      // Real students only: getEnrollments is StudentEnrollment/active, which
+      // excludes Test Student (a StudentViewEnrollment) and anyone no longer
+      // enrolled — used here only to filter candidates, not for names, so a
+      // concluded enrollment still gets the name straight off the submission.
+      const studentIds = new Set((await getEnrollments(courseId).catch(() => [])).map(e => e.userId))
       const results = await mapLimit(checkable, 4, async entry => {
         const [journalSubs, profSubs] = await Promise.all([
           getAssignmentSubmissions(courseId, entry.journalAssignmentId).then(toSubMap),
           getAssignmentSubmissions(courseId, entry.professionalismAssignmentId).then(toSubMap),
         ])
-        return [entry.id, journalGradedGaps(profSubs, journalSubs).map(userId => ({ userId, userName: journalSubs[userId]?.userName ?? `Student ${userId}` }))]
+        const gapIds = journalGradedGaps(profSubs, journalSubs).filter(id => studentIds.has(id))
+        return [entry.id, gapIds.map(userId => ({ userId, userName: journalSubs[userId]?.userName ?? `Student ${userId}` }))]
       })
       if (!cancelled) setJournalGaps(Object.fromEntries(results.filter(([, gap]) => gap.length > 0)))
     })()
