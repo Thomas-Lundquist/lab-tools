@@ -237,3 +237,31 @@ test('a graded journal is never zeroed without Overwrite', () => {
   assert.equal(s.held, true)
   assert.ok(s.outside.some(r => r.includes('Journal has 8')))
 })
+
+// --- pinnedScore: accepting a Canvas-sourced score needs no further write
+// (DECISIONS.md, 2026-11-13) ---
+
+test('a pinned score already matching Canvas needs no write', () => {
+  // kitchen: null so no kitchen flag summary gets built — an otherwise-clean
+  // accept, the common case this feature targets.
+  const canvas = emptyCanvas({ prof: { 1: { score: 2, excused: false, comments: [] } } })
+  const s = plan({ pinnedScore: 2, flagIds: [], kitchen: null }, canvas)
+  assert.deepEqual(s.ops, [])
+})
+
+test('a pulled-in comment already present in Canvas is not re-sent', () => {
+  const canvas = emptyCanvas({ prof: { 1: { score: 2, excused: false, comments: ['Thanks for your help today!'] } } })
+  const s = plan({ pinnedScore: 2, flagIds: [], kitchen: null, comment: 'Thanks for your help today!' }, canvas)
+  assert.deepEqual(s.ops, [])
+})
+
+test('known edge case: commentsOn + leftover kitchen flags still queue a comment after accept', () => {
+  // The student's own flagIds are cleared by acceptCanvasScore, but they're
+  // still assigned to kitchen 1, which (per sectionWith) carries a flag from
+  // other members' grading. buildComment doesn't know the score is pinned, so
+  // it still prepends a flag summary Canvas doesn't have yet — not a bug
+  // introduced by pinning, just a pre-existing interaction worth documenting.
+  const canvas = emptyCanvas({ prof: { 1: { score: 2, excused: false, comments: [] } } })
+  const s = plan({ pinnedScore: 2, flagIds: [] }, canvas)
+  assert.equal(s.ops[0]?.fields?.text_comment, 'Professionalism: 2/4\nKitchen: Floor not swept')
+})

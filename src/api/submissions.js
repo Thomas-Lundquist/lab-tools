@@ -105,7 +105,18 @@ function mapSubmission(raw) {
     // Present only when requested with include[]=submission_comments. The comment
     // bodies already on the submission — used to avoid re-posting an identical one.
     comments:      raw.submission_comments ? raw.submission_comments.map(c => c.comment) : [],
-    // Same comments with their ids — revert deletes the exact comment a commit posted.
-    commentItems:  raw.submission_comments ? raw.submission_comments.map(c => ({ id: String(c.id), comment: c.comment })) : [],
+    // Same comments with their ids — revert deletes the exact comment a commit
+    // posted. authorId/createdAt let a caller pick out the teacher's own
+    // comments (e.g. KitchenScorePanel.jsx's accept-Canvas-score flow) — a
+    // comment Lab Tools itself posted during a commit carries the teacher's own
+    // id too, since every write runs under the teacher's own Canvas session.
+    commentItems:  raw.submission_comments
+      ? raw.submission_comments.map(c => ({
+          id: String(c.id),
+          comment: c.comment,
+          authorId: c.author_id != null ? String(c.author_id) : null,
+          createdAt: c.created_at,
+        }))
+      : [],
   }
 }

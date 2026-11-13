@@ -30,7 +30,11 @@
 //   }
 // A section object: { kitchens: { [kitchenNo]: { flagIds, exceeded } },
 //                     students: { [studentId]: { kitchen, flagIds, present, excused,
-//                                               exceeded, comment, libraryComments } } }
+//                                               exceeded, comment, libraryComments,
+//                                               pinnedScore } } }
+// pinnedScore (number | null): set by acceptCanvasScore when a student's score is
+// adopted from Canvas instead of derived from flags — see deriveStudentScore and
+// DECISIONS.md, 2026-11-13.
 
 import { kvGet, kvSet, kvRemove } from './kv.js'
 import { countKitchenSeverities, individualPenalty, FLAG_BY_ID } from '../config/labFlags.js'
@@ -189,7 +193,7 @@ export function sameSection(a, b) {
   const student = st => {
     const s = st ?? {}
     return JSON.stringify([s.kitchen ?? null, [...(s.flagIds ?? [])].sort(), s.present !== false, !!s.excused,
-      !!s.exceeded, (s.comment ?? '').trim(), s.libraryComments ?? []])
+      !!s.exceeded, (s.comment ?? '').trim(), s.libraryComments ?? [], s.pinnedScore ?? null])
   }
   const kitchen = k => JSON.stringify([[...(k?.flagIds ?? [])].sort(), !!k?.exceeded])
   const blankKitchen = kitchen(null)
@@ -216,6 +220,11 @@ export function deriveStudentScore(section, studentId, maxScore = 4, flagsById =
   const student = section?.students?.[studentId]
   if (!student) return null
   if (student.present === false) return ABSENT_SCORE
+  // A pinned score (acceptCanvasScore) bypasses flag/kitchen derivation entirely —
+  // but only while no flag has since been added, so a pin left stale by a
+  // cross-device sync merge (DECISIONS.md, 2026-11-13) doesn't silently override
+  // a flag the teacher is actively grading with.
+  if (student.pinnedScore != null && (student.flagIds ?? []).length === 0) return student.pinnedScore
   const indivCount = (student.flagIds ?? []).length
   // A student marked "Exceeded" earns a true 4 = 100% regardless of their kitchen's
   // flags, as long as they carry no individual flags of their own (flags win).
@@ -268,17 +277,19 @@ export function setKitchenExceeded(section, kitchenNo, exceeded) {
   return withKitchen(section, kitchenNo, { exceeded })
 }
 
+// Any of these count as the teacher actively re-grading a student, so a
+// pinned score (acceptCanvasScore) must not keep silently overriding them.
 export function toggleStudentFlag(section, studentId, flagId) {
   const prev = section.students?.[studentId] ?? { kitchen: null, flagIds: [], present: true }
-  return withStudent(section, studentId, { flagIds: toggleId(prev.flagIds, flagId) })
+  return withStudent(section, studentId, { flagIds: toggleId(prev.flagIds, flagId), pinnedScore: null })
 }
 
 export function setStudentKitchen(section, studentId, kitchenNo) {
-  return withStudent(section, studentId, { kitchen: kitchenNo })
+  return withStudent(section, studentId, { kitchen: kitchenNo, pinnedScore: null })
 }
 
 export function setPresent(section, studentId, present) {
-  return withStudent(section, studentId, { present })
+  return withStudent(section, studentId, { present, pinnedScore: null })
 }
 
 export function setStudentComment(section, studentId, comment) {
@@ -286,7 +297,42 @@ export function setStudentComment(section, studentId, comment) {
 }
 
 export function setStudentExceeded(section, studentId, exceeded) {
-  return withStudent(section, studentId, { exceeded })
+  return withStudent(section, studentId, { exceeded, pinnedScore: null })
+}
+
+// Adopt Canvas's current submission state for a student as the authoritative
+// local value, instead of deriving a score from flags. Used when the Lab tab's
+// Canvas-mismatch badge is accepted — see DECISIONS.md, 2026-11-13, for why this
+// never tries to reconstruct which flags would explain Canvas's number: many
+// flag combinations collapse to the same tier, and many real hand-entered scores
+// aren't reachable by any flag combination at all. `canvas` is the mismatch-
+// relevant subset of a submission: { score, excused }.
+export function acceptCanvasScore(section, studentId, canvas) {
+  if (canvas.excused) {
+    // Mirrors the same present:false + excused:true pair ScoringPanel/commitPlan
+    // already use to mean "excused" elsewhere — excused alone would leave this
+    // student on the present branch of canvasMismatch and the badge would never
+    // clear (see KitchenScorePanel.jsx's acceptCanvas).
+    return withStudent(section, studentId, { present: false, excused: true, exceeded: false, pinnedScore: null })
+  }
+  if (canvas.score != null && Number(canvas.score) === 0) {
+    // Canvas's own 0 already means absent in this system (ABSENT_SCORE) — no
+    // pin needed, it's the same convention as every other absence.
+    return withStudent(section, studentId, { present: false, excused: false, exceeded: false, pinnedScore: null })
+  }
+  return withStudent(section, studentId, {
+    present: true, excused: false, exceeded: false, flagIds: [], pinnedScore: Number(canvas.score),
+  })
+}
+
+// The teacher's own most recent Canvas submission comment, or null.
+// commentItems is a submission's mapped comment list (api/submissions.js),
+// which now carries each comment's authorId/createdAt.
+export function pickTeacherComment(commentItems, teacherUserId) {
+  if (!teacherUserId) return null
+  const mine = (commentItems ?? []).filter(c => c.authorId === teacherUserId)
+  if (!mine.length) return null
+  return mine.reduce((latest, c) => (!latest || (c.createdAt ?? '') > (latest.createdAt ?? '') ? c : latest)).comment
 }
 
 // Toggle one reusable library comment on a student. Stored as a list of the
