@@ -361,7 +361,8 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
             <p className="text-xs text-[var(--color-text-muted)]">
               Unchecking a period above hides that student from its roster everywhere (Lab tab, Unit/Term rollup)
               without touching their enrollment in Canvas. "Usual kitchens" sets where each student starts on a lab
-              that hasn't been graded yet — moving someone during grading still updates it, the same as before.
+              that hasn't been graded yet — this is the only place that changes; moving someone during grading is
+              just for that lab, so they settle back into their usual kitchen next time.
             </p>
           </div>
 

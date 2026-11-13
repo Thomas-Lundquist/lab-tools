@@ -24,7 +24,7 @@ import {
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
   acceptCanvasScore, pickTeacherComment,
 } from '../../storage/labGrading.js'
-import { seedStandingKitchens, saveStandingKitchen, isLatestLab, newestFirst, todaysLab, labDateFor, localToday } from '../../storage/kitchens.js'
+import { seedStandingKitchens, newestFirst, todaysLab, labDateFor, localToday } from '../../storage/kitchens.js'
 import { uncommittedPeriods } from './periodStatus.js'
 import { planCommit, buildSection } from './commitPlan.js'
 import { runCommit, runRevert, planRevert } from './commitRun.js'
@@ -236,16 +236,13 @@ export default function KitchenScorePanel({
     })
   }, [labId, sectionId])
 
-  // Moving a student also moves their usual kitchen, so the next lab for this
-  // period starts with the latest arrangement. A fix to an older lab doesn't.
-  const latestLab = !!entry && isLatestLab(entry, entries, sectionId)
+  // A move here is this lab's own record only — it never touches the period's
+  // usual kitchens (storage/kitchens.js), so a student who's moved for one lab
+  // settles back into their usual spot next time. The only way to change the
+  // usual kitchen is Course Settings' own editor (DECISIONS.md, 2026-11-13).
   const assignKitchen = useCallback((studentId, kitchen) => {
     applySection(s => setStudentKitchen(s, studentId, kitchen))
-    if (latestLab) {
-      saveStandingKitchen(courseId, sectionId, studentId, kitchen)
-        .catch(err => toast(`Couldn't save the usual kitchen: ${err.message}`, 'warning'))
-    }
-  }, [applySection, courseId, sectionId, latestLab, toast])
+  }, [applySection])
 
   // Throws away this device's unsaved edits and rebuilds the screen from the
   // last committed set (or, if never committed, Canvas's present/absent/excused).
@@ -671,7 +668,7 @@ export default function KitchenScorePanel({
 
           <p className="text-xs text-[var(--color-text-muted)]">
             Edits autosave on this device. Nothing posts to Canvas until you commit.{' '}
-            {latestLab ? 'Kitchen placements carry over to this period’s next lab.' : 'This is an older lab: kitchen changes here stay with this lab.'}
+            Kitchen changes here stay with this lab — set a period’s usual kitchens in Course Settings.
           </p>
 
           {/* Sticky at the bottom of the screen: the period at a glance and Commit,

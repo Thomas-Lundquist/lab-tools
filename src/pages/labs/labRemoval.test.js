@@ -6,7 +6,7 @@ globalThis.document = { cookie: '_csrf_token=tok' }
 
 const { absentStudents, planJournalUndo } = await import('./labRemoval.js')
 const { planRevert } = await import('./commitRun.js')
-const { isLatestLab, standingFromLatestLab } = await import('../../storage/kitchens.js')
+const { standingFromLatestLab } = await import('../../storage/kitchens.js')
 
 test('absentStudents gathers absences from every committed period', () => {
   const lab = {
@@ -36,15 +36,6 @@ test('revert skips a student whose score changed in Canvas after the commit', ()
   const { changed } = planRevert(record, current)
   assert.deepEqual(changed.map(c => c.userId), ['1'])
   assert.ok(changed[0].outside[0].includes('Canvas has 3'))
-})
-
-test('kitchen moves count as the usual kitchens only in the latest lab', () => {
-  const sep = { id: 'lab_1', dates: { s: '2026-09-10' } }
-  const oct = { id: 'lab_2', dates: { s: '2026-10-20' } }
-  const future = { id: 'lab_3', dates: { s: '2026-12-01' } }
-  const all = [sep, oct, future]
-  assert.equal(isLatestLab(sep, all, 's', '2026-11-02'), false)
-  assert.equal(isLatestLab(oct, all, 's', '2026-11-02'), true, 'a lab set up ahead of time does not count')
 })
 
 test('a discarded draft does not outrank a newer commit when seeding', () => {

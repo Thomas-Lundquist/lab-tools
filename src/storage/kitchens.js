@@ -2,8 +2,10 @@
 // cooks in, so a new lab starts with everyone already placed instead of every
 // student "Unassigned". A lab's own grading state (labGrading.js) still records
 // the kitchen each student actually had that day — this is only the starting
-// point for labs that haven't been graded yet. Moving a student updates it,
-// unless the move is a fix to an older lab (isLatestLab).
+// point for labs that haven't been graded yet. The only way to change it is the
+// Course Settings editor (CourseSettingsModal.jsx) — moving a student during
+// grading is a one-off for that lab and never touches this record, so students
+// settle back into their usual spot next time (DECISIONS.md, 2026-11-13).
 //
 // One synced key per course, `kitchens/<courseId>`, shaped
 //   { [sectionId]: { students: { [studentId]: kitchenNo } } }
@@ -105,16 +107,4 @@ export function labDateFor(entry, sectionId) {
   if (d) return d
   const ms = Number(String(entry?.id ?? '').replace(/^lab_/, ''))
   return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : ''
-}
-
-// Whether a kitchen move in this lab should become the period's usual kitchens:
-// yes unless a later lab (up to today; labs set up ahead of time don't count)
-// exists for the period, i.e. this is a fix to an older lab.
-export function isLatestLab(entry, entries, sectionId, today = localToday()) {
-  const mine = labDateFor(entry, sectionId)
-  return !entries.some(e => {
-    if (e.id === entry.id) return false
-    const d = labDateFor(e, sectionId)
-    return d > mine && d <= today
-  })
 }
