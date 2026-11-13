@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   emptyState, isUnsavedDraft, periodStatus, sameSection, activeSection, deriveStudentScore, deriveSectionScores,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentExceeded,
+  acceptCanvasScore, pickTeacherComment,
 } from './labGrading.js'
 
 // A small section exercising every path: kitchen 1 has two minor flags
@@ -201,4 +202,78 @@ test('a real edit is still unsaved', () => {
   const draft = { kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: false } } }
   assert.equal(periodStatus({ committed, draft }), 'draft')
   assert.equal(periodStatus({ committed: null, draft }), 'draft', 'never committed')
+})
+
+// --- pinnedScore: accepting Canvas's score instead of deriving one from flags
+// (DECISIONS.md, 2026-11-13) ---
+
+test('a pinned score bypasses kitchen/flag derivation entirely', () => {
+  const section = {
+    kitchens: { 1: { flagIds: ['equipment-on-unattended'], exceeded: false } }, // would otherwise be 2
+    students: { s1: { kitchen: 1, flagIds: [], present: true, pinnedScore: 3.5 } },
+  }
+  assert.equal(deriveStudentScore(section, 's1'), 3.5)
+})
+
+test('absent still wins over a stale pinned score', () => {
+  const section = { kitchens: {}, students: { s1: { present: false, pinnedScore: 2 } } }
+  assert.equal(deriveStudentScore(section, 's1'), 0)
+})
+
+test('a pin is ignored once an individual flag is present (defends a sync-merge race)', () => {
+  // kitchen score 4 (no kitchen) minus 1 Minor flag -> 3, NOT the pinned 1.
+  const section = { kitchens: {}, students: { s1: { kitchen: null, flagIds: ['phone-out'], present: true, pinnedScore: 1 } } }
+  assert.equal(deriveStudentScore(section, 's1'), 3, 'a differing pin is ignored, not honored, once flagIds is non-empty')
+})
+
+test('acceptCanvasScore: a real score pins it and clears flags', () => {
+  const section = { kitchens: {}, students: { s1: { kitchen: 2, flagIds: ['phone-out'], present: false, exceeded: true } } }
+  const next = acceptCanvasScore(section, 's1', { score: 2.5, excused: false })
+  assert.deepEqual(next.students.s1, { kitchen: 2, flagIds: [], present: true, excused: false, exceeded: false, pinnedScore: 2.5 })
+})
+
+test('acceptCanvasScore: Canvas\'s own 0 reuses the absence convention, no pin', () => {
+  const section = { kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: true, pinnedScore: 9 } } }
+  const next = acceptCanvasScore(section, 's1', { score: 0, excused: false })
+  assert.equal(next.students.s1.present, false)
+  assert.equal(next.students.s1.pinnedScore, null)
+  assert.equal(deriveStudentScore(next, 's1'), 0)
+})
+
+test('acceptCanvasScore: excused sets present:false alongside excused:true (so the mismatch clears)', () => {
+  const section = { kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: true } } }
+  const next = acceptCanvasScore(section, 's1', { score: null, excused: true })
+  assert.equal(next.students.s1.present, false)
+  assert.equal(next.students.s1.excused, true)
+  assert.equal(next.students.s1.pinnedScore, null)
+})
+
+test('pickTeacherComment: picks the teacher\'s latest comment by createdAt', () => {
+  const items = [
+    { comment: 'older', authorId: 't1', createdAt: '2026-11-01T00:00:00Z' },
+    { comment: 'not mine', authorId: 'other', createdAt: '2026-11-12T00:00:00Z' },
+    { comment: 'newer', authorId: 't1', createdAt: '2026-11-10T00:00:00Z' },
+  ]
+  assert.equal(pickTeacherComment(items, 't1'), 'newer')
+})
+
+test('pickTeacherComment: null with no match, no teacherUserId, or no comments', () => {
+  assert.equal(pickTeacherComment([{ comment: 'x', authorId: 'other' }], 't1'), null)
+  assert.equal(pickTeacherComment([{ comment: 'x', authorId: 't1' }], null), null)
+  assert.equal(pickTeacherComment([], 't1'), null)
+  assert.equal(pickTeacherComment(undefined, 't1'), null)
+})
+
+test('sameSection treats a pinnedScore-only difference as a real change', () => {
+  const a = { kitchens: {}, students: { s1: { kitchen: null, flagIds: [], present: true } } }
+  const b = { kitchens: {}, students: { s1: { kitchen: null, flagIds: [], present: true, pinnedScore: 2 } } }
+  assert.equal(sameSection(a, b), false)
+})
+
+test('toggleStudentFlag, setStudentKitchen, setStudentExceeded, and setPresent each clear a pinned score', () => {
+  const pinned = () => ({ kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: true, pinnedScore: 3 } } })
+  assert.equal(toggleStudentFlag(pinned(), 's1', 'phone-out').students.s1.pinnedScore, null)
+  assert.equal(setStudentKitchen(pinned(), 's1', 2).students.s1.pinnedScore, null)
+  assert.equal(setStudentExceeded(pinned(), 's1', true).students.s1.pinnedScore, null)
+  assert.equal(setPresent(pinned(), 's1', false).students.s1.pinnedScore, null)
 })

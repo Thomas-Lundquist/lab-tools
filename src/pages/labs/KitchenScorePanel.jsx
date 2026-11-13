@@ -15,12 +15,14 @@ import { getSections } from '../../api/sections.js'
 import { getEnrollments } from '../../api/enrollments.js'
 import { getAssignmentSubmissions } from '../../api/submissions.js'
 import { getOverrides } from '../../api/overrides.js'
+import { getCurrentUser } from '../../api/auth.js'
 import { getCourseSetup, getLabs, isStandalone, getFlags, getCommentBank } from '../../storage/setup.js'
 import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
   getLabGrading, getAllLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, periodStatus, sameSection,
   deriveSectionScores, emptySection,
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
+  acceptCanvasScore, pickTeacherComment,
 } from '../../storage/labGrading.js'
 import { seedStandingKitchens, saveStandingKitchen, isLatestLab, newestFirst, todaysLab, labDateFor, localToday } from '../../storage/kitchens.js'
 import { uncommittedPeriods } from './periodStatus.js'
@@ -63,6 +65,9 @@ export default function KitchenScorePanel({
   const [dismissed, setDismissed]     = useState(() => new Set()) // "labId:sectionId" hidden for this launch
   const [section, setSection]         = useState(emptySection())
   const [standing, setStanding]       = useState(null) // this period's usual kitchens (storage/kitchens.js)
+
+  const [teacherUserId, setTeacherUserId] = useState(null) // for the accept-Canvas-score comment pull (DECISIONS.md, 2026-11-13)
+  useEffect(() => { getCurrentUser().then(u => setTeacherUserId(u.id)).catch(() => {}) }, [])
 
   const [confirming, setConfirming]   = useState(false)
   const [preview, setPreview]         = useState(null) // { plan, canvas } | { error } while confirming
@@ -639,7 +644,7 @@ export default function KitchenScorePanel({
                     )}
                     {members.map(s => (
                       <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]} canvas={profState[s.userId]}
-                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
+                        kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore} teacherUserId={teacherUserId}
                         flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                     ))}
                   </div>
@@ -759,10 +764,25 @@ function canvasMismatch(st, score, canvas) {
   return matches ? null : (canvas.excused ? 'Excused' : String(canvas.score))
 }
 
-function StudentRowBase({ student, section, score, canvas, kitchenCount, commentLibrary = [], maxScore = 4, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
+function StudentRowBase({ student, section, score, canvas, kitchenCount, commentLibrary = [], maxScore = 4, teacherUserId = null, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
   const mismatch = canvasMismatch(st, score, canvas)
+
+  // Adopt Canvas's current value as this student's score, instead of deriving one
+  // from flags — see acceptCanvasScore/pickTeacherComment in storage/labGrading.js
+  // and DECISIONS.md, 2026-11-13, for why this never reconstructs flags. Only
+  // fills the comment box if it's empty, so a note mid-typing is never clobbered.
+  function acceptCanvas() {
+    const pulled = pickTeacherComment(canvas?.commentItems, teacherUserId)
+    onApply(s => {
+      let next = acceptCanvasScore(s, student.userId, canvas)
+      const existing = (next.students[student.userId].comment ?? '').trim()
+      if (pulled && !existing) next = setStudentComment(next, student.userId, pulled)
+      return next
+    })
+  }
+
   const [open, setOpen] = useState(false)
   const [commentOpen, setCommentOpen] = useState(false)   // big write modal (Apple Pencil / large screen)
   const [libraryOpen, setLibraryOpen] = useState(false)   // comment-library picker modal
@@ -801,12 +821,15 @@ function StudentRowBase({ student, section, score, canvas, kitchenCount, comment
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
         {mismatch && (
-          <span
-            className="shrink-0 text-xs font-medium px-1.5 py-0.5 rounded-full border border-[var(--color-warning)] text-[var(--color-warning)] whitespace-nowrap"
-            title="Canvas currently holds this, not entered through Lab Tools. Committing will ask before changing it."
+          <button
+            type="button"
+            onClick={acceptCanvas}
+            title={`Canvas currently holds ${mismatch}, not entered through Lab Tools. Click to accept it as this student's score.`}
+            className="shrink-0 flex flex-col items-center leading-none gap-0.5 px-1.5 py-0.5 rounded-[var(--radius-control)] border border-[var(--color-error)] text-[var(--color-error)] hover:bg-[var(--color-bg-hover)]"
           >
-            Canvas: {mismatch}
-          </span>
+            <span className="text-sm font-bold">{mismatch}</span>
+            <span className="text-[0.6rem] font-medium">Canvas</span>
+          </button>
         )}
         <AttendanceSwitch absent={absent} name={student.userName}
           onToggle={() => onApply(s => setPresent(s, student.userId, absent))} />
@@ -936,6 +959,7 @@ function studentRowEqual(prev, next) {
     && prev.canvas === next.canvas
     && prev.kitchenCount === next.kitchenCount
     && prev.maxScore === next.maxScore
+    && prev.teacherUserId === next.teacherUserId
     && prev.commentLibrary === next.commentLibrary
     && prev.flagsById === next.flagsById
     && prev.individualFlags === next.individualFlags
@@ -1043,7 +1067,7 @@ function fmtWhen(iso) {
 
 // Canvas's state for each student's professionalism submission.
 function profStateFrom(subs) {
-  return Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused, comments: s.comments ?? [] }]))
+  return Object.fromEntries(subs.map(s => [s.userId, { score: s.score, excused: !!s.excused, comments: s.comments ?? [], commentItems: s.commentItems ?? [] }]))
 }
 
 const revertCount = stored => Object.keys(stored?.lastCommit?.record?.students ?? {}).length
