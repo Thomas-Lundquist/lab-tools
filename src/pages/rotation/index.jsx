@@ -7,6 +7,7 @@ import { Tabs } from '../../components/Tabs.jsx'
 import Button from '../../components/Button.jsx'
 import Card from '../../components/Card.jsx'
 import { useToast } from '../../components/Toast.jsx'
+import { useRoute, navigate } from '../../utils/nav.js'
 import { keyPrefix } from '../../storage/kv.js'
 import { getRotation, updateRotation, getHistory, saveHistory, clearHistory } from '../../storage/rotation.js'
 import { blankBlock, blockLabel, allBlockIds, staffedKitchenIdxs, setAbsent, clearAbsences, todayStamp, isAbsent } from './model.js'
@@ -52,6 +53,18 @@ export default function RotationPage() {
   const { byBlock: rosters, reload: reloadRosters } = useRosters(state)
 
   useEffect(() => { getRotation().then(setState) }, [])
+
+  // Opened as #rotation?board=<blockId> (the Lab tab's "Open kitchen board"
+  // shortcut): go straight to that class's fullscreen board. Closing it drops
+  // the param, so a reload lands back on the rotator page.
+  const { params } = useRoute()
+  useEffect(() => {
+    if (params.board && state?.blocks[params.board]) setFullscreenId(params.board)
+  }, [params.board, state])
+  function closeFullscreen() {
+    setFullscreenId(null)
+    if (params.board) navigate('rotation', {}, { replace: true })
+  }
 
   // Absences belong to one class day. A board left open overnight reloads so
   // yesterday's marks lapse (normalizeState expires them).
@@ -318,7 +331,7 @@ export default function RotationPage() {
       )}
       {fullscreenId && state?.blocks[fullscreenId] && (
         <FullscreenBoard state={state} blockId={fullscreenId} names={rosters[fullscreenId]?.names ?? {}}
-          display={blockDisplay(state, fullscreenId)} onClose={() => setFullscreenId(null)} />
+          display={blockDisplay(state, fullscreenId)} onClose={closeFullscreen} />
       )}
     </>
   )

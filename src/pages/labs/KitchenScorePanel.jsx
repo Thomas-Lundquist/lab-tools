@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
-import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus, Undo2, XCircle, X } from 'lucide-react'
+import { Loader, AlertTriangle, ChevronRight, ChevronDown, Flag, Maximize2, Plus, Undo2, XCircle, X, Monitor } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Select from '../../components/Select.jsx'
@@ -26,6 +26,9 @@ import {
 } from '../../storage/labGrading.js'
 import { seedStandingKitchens, newestFirst, todaysLab, labDateFor, localToday } from '../../storage/kitchens.js'
 import { uncommittedPeriods } from './periodStatus.js'
+import { getRotation } from '../../storage/rotation.js'
+import { allBlockIds } from '../rotation/model.js'
+import { navigate } from '../../utils/nav.js'
 import { planCommit, buildSection } from './commitPlan.js'
 import { runCommit, runRevert, planRevert } from './commitRun.js'
 
@@ -66,6 +69,17 @@ export default function KitchenScorePanel({
   const [section, setSection]         = useState(emptySection())
   const [standing, setStanding]       = useState(null) // this period's usual kitchens (storage/kitchens.js)
 
+  // The Kitchen Rotation class linked to this period, if any, for the "Open
+  // kitchen board" shortcut. Read-only: the Lab tab never writes rotation state.
+  const [boardId, setBoardId] = useState(null)
+  useEffect(() => {
+    let live = true
+    if (!sectionId) { setBoardId(null); return }
+    getRotation()
+      .then(rot => { if (live) setBoardId(allBlockIds(rot).find(id => rot.blocks[id]?.sectionId === sectionId) ?? null) })
+      .catch(() => { if (live) setBoardId(null) })
+    return () => { live = false }
+  }, [sectionId])
   const [teacherUserId, setTeacherUserId] = useState(null) // for the accept-Canvas-score comment pull (DECISIONS.md, 2026-11-13)
   useEffect(() => { getCurrentUser().then(u => setTeacherUserId(u.id)).catch(() => {}) }, [])
 
@@ -534,6 +548,12 @@ export default function KitchenScorePanel({
               </div>
             )}
           </div>
+        )}
+
+        {boardId && (
+          <Button variant="secondary" size="sm" icon={Monitor} onClick={() => navigate('rotation', { board: boardId })}>
+            Open kitchen board
+          </Button>
         )}
       </Card>
 
