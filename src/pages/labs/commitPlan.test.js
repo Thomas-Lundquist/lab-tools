@@ -131,6 +131,46 @@ test('buildComment omits flags when told to', () => {
   assert.equal(buildComment(sectionWith({ comment: 'Hi' }), '1', 3, false, byId), 'Hi')
 })
 
+// --- whole-class and kitchen comments ---
+
+const withShared = (student, { cls = '', kit = '' } = {}) => ({
+  classComment: cls,
+  kitchens: { 1: { flagIds: [], comment: kit } },
+  students: { 1: { kitchen: 1, flagIds: [], present: true, ...student } },
+})
+const planShared = (student, shared, s = settings) =>
+  planCommit({ roster, section: withShared(student, shared), prior: null, canvas: emptyCanvas(), ids, settings: s, byId }).students[0]
+
+test('present students get labeled class, kitchen, and personal comments', () => {
+  const st = planShared({ comment: 'Nice dice', libraryComments: ['Great teamwork'] }, { cls: 'Clean up faster', kit: 'Sink left full' })
+  assert.equal(st.comment,
+    'Whole class comments: Clean up faster\n\nKitchen comments: Sink left full\n\nPersonal comments: Great teamwork\n\nNice dice')
+})
+
+test('class and kitchen comments post even with the flag summary off', () => {
+  const st = planShared({}, { cls: 'Good day', kit: '' }, { ...settings, commentsOn: false })
+  assert.equal(st.comment, 'Whole class comments: Good day')
+})
+
+test('a personal comment alone posts unlabeled, as before', () => {
+  assert.equal(planShared({ comment: 'Hi' }, {}, { ...settings, commentsOn: false }).comment, 'Hi')
+})
+
+test('absent and excused students get only their own comment', () => {
+  const shared = { cls: 'Good day', kit: 'Messy' }
+  assert.equal(planShared({ present: false, comment: 'Missed you' }, shared).comment, 'Missed you')
+  assert.equal(planShared({ present: false, excused: true }, shared).comment, null)
+})
+
+test('a student with no kitchen gets the class comment but no kitchen comment', () => {
+  const st = planShared({ kitchen: null, comment: 'Hi' }, { cls: 'All', kit: 'K1 only' }, { ...settings, commentsOn: false })
+  assert.equal(st.comment, 'Whole class comments: All\n\nPersonal comments: Hi')
+})
+
+test('buildSection keeps the class comment from the stored set', () => {
+  assert.equal(buildSection(roster, { ...priorWith({}), classComment: 'Keep me' }, {}).classComment, 'Keep me')
+})
+
 // --- runner + revert against a fake Canvas ---
 
 let sent

@@ -32,15 +32,22 @@ import { deriveStudentScore } from '../../storage/labGrading.js'
 import { FLAG_BY_ID } from '../../config/labFlags.js'
 import { checkGradeWrite } from '../../debug/checks.js'
 
-// One submission comment body: the flag summary (only when includeFlags) plus
-// library comments and the free-text comment. Deterministic, so an unchanged
-// commit produces the same string and can be skipped as a duplicate.
-export function buildComment(section, studentId, score, includeFlags, byId = FLAG_BY_ID) {
+// One submission comment body: the flag summary (only when includeFlags), then
+// the whole-class comment, the student's kitchen comment, and their own library
+// and free-text comments. Deterministic, so an unchanged commit produces the
+// same string and can be skipped as a duplicate.
+//
+// Class and kitchen comments go only to present students (includeShared): an
+// absent student wasn't in the room for them. Each part is labeled, except that
+// a personal comment standing alone posts unlabeled, exactly as before, so
+// recommitting a period committed before shared comments existed doesn't post
+// a near-duplicate.
+export function buildComment(section, studentId, score, includeFlags, byId = FLAG_BY_ID, includeShared = false) {
   const st = section.students[studentId]
   if (!st) return ''
   const parts = []
+  const kitchen = st.kitchen != null ? section.kitchens?.[st.kitchen] : null
   if (includeFlags) {
-    const kitchen = st.kitchen != null ? section.kitchens[st.kitchen] : null
     const kitchenLabels = (kitchen?.flagIds ?? []).map(id => byId[id]?.label).filter(Boolean)
     const indivLabels = (st.flagIds ?? []).map(id => byId[id]?.label).filter(Boolean)
     if (st.exceeded && indivLabels.length === 0) {
@@ -52,12 +59,15 @@ export function buildComment(section, studentId, score, includeFlags, byId = FLA
       parts.push(lines.join('\n'))
     }
   }
-  for (const lib of (st.libraryComments ?? [])) {
-    const t = lib.trim()
-    if (t) parts.push(t)
+  const classText = includeShared ? (section.classComment ?? '').trim() : ''
+  const kitchenText = includeShared ? (kitchen?.comment ?? '').trim() : ''
+  const personal = [...(st.libraryComments ?? []), st.comment ?? ''].map(t => t.trim()).filter(Boolean)
+  if (classText) parts.push(`Whole class comments: ${classText}`)
+  if (kitchenText) parts.push(`Kitchen comments: ${kitchenText}`)
+  if (personal.length) {
+    const body = personal.join('\n\n')
+    parts.push(classText || kitchenText ? `Personal comments: ${body}` : body)
   }
-  const free = (st.comment ?? '').trim()
-  if (free) parts.push(free)
   return parts.join('\n\n')
 }
 
@@ -84,7 +94,7 @@ export function buildSection(roster, prior, profState, standing = null) {
           excused: !!canvas.excused,
         }
   }
-  return { kitchens: prior?.kitchens ?? {}, students }
+  return { kitchens: prior?.kitchens ?? {}, students, classComment: prior?.classComment ?? '' }
 }
 
 const sameScore = (a, b) => a != null && b != null && Number(a) === Number(b)
@@ -149,7 +159,7 @@ export function planCommit({ roster, section, prior, canvas, ids, settings, byId
       const fields = {}
       if (prof.excused) fields.excuse = false
       if (prof.excused || !sameScore(prof.score, score)) fields.posted_grade = String(score)
-      addComment(fields, buildComment(section, userId, score, commentsOn, byId))
+      addComment(fields, buildComment(section, userId, score, commentsOn, byId, true))
       if (Object.keys(fields).length) ops.push({ target: 'prof', fields })
       // Back from absent: undo what the absence wrote to the journal.
       if (wasAbsent && hasJournal) {

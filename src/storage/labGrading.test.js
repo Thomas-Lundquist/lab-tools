@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   emptyState, isUnsavedDraft, periodStatus, sameSection, activeSection, deriveStudentScore, deriveSectionScores,
-  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentExceeded,
+  toggleKitchenFlag, setKitchenExceeded, setKitchenComment, setClassComment, toggleStudentFlag, setStudentKitchen, setPresent, setStudentExceeded,
   acceptCanvasScore, pickTeacherComment,
 } from './labGrading.js'
 
@@ -276,4 +276,11 @@ test('toggleStudentFlag, setStudentKitchen, setStudentExceeded, and setPresent e
   assert.equal(setStudentKitchen(pinned(), 's1', 2).students.s1.pinnedScore, null)
   assert.equal(setStudentExceeded(pinned(), 's1', true).students.s1.pinnedScore, null)
   assert.equal(setPresent(pinned(), 's1', false).students.s1.pinnedScore, null)
+})
+
+test('sameSection sees class and kitchen comment edits, ignoring blanks', () => {
+  const base = { kitchens: {}, students: { s1: { kitchen: 1, flagIds: [], present: true } } }
+  assert.equal(sameSection(setClassComment(base, 'Hi'), base), false)
+  assert.equal(sameSection(setKitchenComment(base, 1, 'Wipe down'), base), false)
+  assert.equal(sameSection(setClassComment(setKitchenComment(base, 1, '  '), ''), base), true)
 })

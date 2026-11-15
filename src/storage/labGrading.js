@@ -28,7 +28,8 @@
 //                  // for each student. A score in Canvas that differs was changed
 //                  // there (a makeup), and the next commit holds it (commitPlan.js).
 //   }
-// A section object: { kitchens: { [kitchenNo]: { flagIds, exceeded } },
+// A section object: { classComment,
+//                     kitchens: { [kitchenNo]: { flagIds, exceeded, comment } },
 //                     students: { [studentId]: { kitchen, flagIds, present, excused,
 //                                               exceeded, comment, libraryComments,
 //                                               pinnedScore } } }
@@ -195,7 +196,8 @@ export function sameSection(a, b) {
     return JSON.stringify([s.kitchen ?? null, [...(s.flagIds ?? [])].sort(), s.present !== false, !!s.excused,
       !!s.exceeded, (s.comment ?? '').trim(), s.libraryComments ?? [], s.pinnedScore ?? null])
   }
-  const kitchen = k => JSON.stringify([[...(k?.flagIds ?? [])].sort(), !!k?.exceeded])
+  if ((a.classComment ?? '').trim() !== (b.classComment ?? '').trim()) return false
+  const kitchen = k => JSON.stringify([[...(k?.flagIds ?? [])].sort(), !!k?.exceeded, (k?.comment ?? '').trim()])
   const blankKitchen = kitchen(null)
   const ids = new Set([...Object.keys(a.students ?? {}), ...Object.keys(b.students ?? {})])
   for (const id of ids) if (student(a.students?.[id]) !== student(b.students?.[id])) return false
@@ -275,6 +277,17 @@ export function toggleKitchenFlag(section, kitchenNo, flagId) {
 
 export function setKitchenExceeded(section, kitchenNo, exceeded) {
   return withKitchen(section, kitchenNo, { exceeded })
+}
+
+// A comment for everyone in one kitchen, posted (labeled) to each present
+// member's submission comment on commit — see commitPlan.js's buildComment.
+export function setKitchenComment(section, kitchenNo, comment) {
+  return withKitchen(section, kitchenNo, { comment })
+}
+
+// A comment for the whole period, posted (labeled) to every present student.
+export function setClassComment(section, comment) {
+  return { ...section, classComment: comment }
 }
 
 // Any of these count as the teacher actively re-grading a student, so a
