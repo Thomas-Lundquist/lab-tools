@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Link2, BookOpen, AlertTriangle, Trash2, Loader, X, Pencil } from 'lucide-react'
+import { Plus, Link2, BookOpen, AlertTriangle, Trash2, Loader, X, Pencil, CalendarDays } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Modal from '../../components/Modal.jsx'
@@ -122,9 +122,9 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
   const [sectionId, setSectionId] = useState('')
   const [labDate, setLabDate]     = useState('')
   const [busy, setBusy]           = useState(false)
-  // Which covered section's date is being edited in place, and its draft value.
-  const [editingSectionId, setEditingSectionId] = useState(null)
-  const [editSectionDate, setEditSectionDate]   = useState('')
+  // Unsaved edits to covered periods' lab dates: sectionId -> 'YYYY-MM-DD'.
+  // Every date shows as a field; one Save writes only the ones changed here.
+  const [dateDrafts, setDateDrafts] = useState({})
 
   const journalDueOffset   = courseSetup?.settings?.journalDueOffsetDays ?? 1
   const journalCloseOffset = courseSetup?.settings?.labCloseDateOffsetDays ?? 14
@@ -144,6 +144,12 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
   // list — one override per section is all Canvas keeps.
   const coveredSectionIds = new Set((overrides ?? []).map(o => o.courseSectionId).filter(Boolean))
   const availableSections = sections.filter(s => !coveredSectionIds.has(s.id))
+  // Covered periods in the course's own section order (A1, A2, … B4), with any
+  // the section list doesn't know about at the end.
+  const sortedCovered = [
+    ...sections.map(s => s.id).filter(id => coveredSectionIds.has(id)),
+    ...[...coveredSectionIds].filter(id => !sections.some(s => s.id === id)),
+  ]
 
   async function handleAdd() {
     const sec = sections.find(s => s.id === sectionId)
@@ -208,34 +214,65 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
     }
   }
 
-  // Edits an already-covered section's lab date in place — same effect as a
-  // remove followed by an add, without the round trip (and without a moment
-  // where the section has no override at all). Mirrors handleAdd's
-  // existing-vs-create check, since a section can be covered by a dateless
-  // visibility override (added via a scope change) with nothing yet to update.
-  async function handleEditSectionDate(sectionId) {
+  // Writes one covered section's lab date to Canvas: same effect as a remove
+  // followed by an add, without a moment where the section has no override at
+  // all. Mirrors handleAdd's existing-vs-create check, since a section can be
+  // covered by a dateless visibility override (added via a scope change) with
+  // nothing yet to update. Throws on failure; saveDates reports it by name.
+  async function writeSectionDate(sectionId, date, journalOverrides) {
     const sec = sections.find(s => s.id === sectionId)
-    if (!editSectionDate) { toast('Enter the lab date for the period.', 'warning'); return }
+    const profFields = { courseSectionId: sectionId, ...professionalismOverrideDates(date), title: sec?.name ?? sectionId }
+    const profOverride = (overrides ?? []).find(o => o.courseSectionId === sectionId)
+    if (profOverride) await updateOverride(courseId, assignmentId, profOverride.id, profFields)
+    else await createOverride(courseId, assignmentId, profFields)
+    if (journalOverrides) {
+      const journalFields = { courseSectionId: sectionId, ...journalOverrideDates(date, journalDueOffset, journalCloseOffset), title: sec?.name ?? sectionId }
+      const journalOverride = journalOverrides.find(o => o.courseSectionId === sectionId)
+      if (journalOverride) await updateOverride(courseId, entry.journalAssignmentId, journalOverride.id, journalFields)
+      else await createOverride(courseId, entry.journalAssignmentId, journalFields)
+    }
+  }
+
+  // Covered periods whose field differs from the saved date (blank fields are
+  // ignored: removing a period is the trash button's job, not a cleared date).
+  const changedDates = Object.entries(dateDrafts)
+    .filter(([id, d]) => d && d !== (entry.dates?.[id] ?? '') && coveredSectionIds.has(id))
+
+  // One Save for every changed date. Each period is written on its own, so one
+  // failure doesn't stop the rest; the ones that worked are recorded, the ones
+  // that didn't keep their edited value and are named in the toast.
+  async function saveDates() {
+    if (changedDates.length === 0) return
     setBusy(true)
     try {
-      const profFields = { courseSectionId: sectionId, ...professionalismOverrideDates(editSectionDate), title: sec?.name ?? sectionId }
-      const profOverride = (overrides ?? []).find(o => o.courseSectionId === sectionId)
-      if (profOverride) await updateOverride(courseId, assignmentId, profOverride.id, profFields)
-      else await createOverride(courseId, assignmentId, profFields)
+      let journalOverrides = null
       if (!isStandalone(entry) && entry.journalAssignmentId) {
-        const journalFields = { courseSectionId: sectionId, ...journalOverrideDates(editSectionDate, journalDueOffset, journalCloseOffset), title: sec?.name ?? sectionId }
-        const journalOverrides = await getOverrides(courseId, entry.journalAssignmentId)
-        const journalOverride = journalOverrides.find(o => o.courseSectionId === sectionId)
-        if (journalOverride) await updateOverride(courseId, entry.journalAssignmentId, journalOverride.id, journalFields)
-        else await createOverride(courseId, entry.journalAssignmentId, journalFields)
+        try { journalOverrides = await getOverrides(courseId, entry.journalAssignmentId) }
+        catch (err) { toast(`Could not load the journal's dates, so nothing was saved: ${err.message}`, 'error'); return }
       }
-      const updated = await saveLab({ id: entry.id, dates: { ...entry.dates, [sectionId]: editSectionDate } })
-      toast(`Updated ${sec?.name ?? 'the period'}'s lab date.`, 'success')
-      setEditingSectionId(null)
+      const saved = {}
+      const failed = []
+      for (const [id, date] of changedDates) {
+        try {
+          await writeSectionDate(id, date, journalOverrides)
+          saved[id] = date
+        } catch (err) {
+          failed.push({ name: sections.find(s => s.id === id)?.name ?? id, err })
+        }
+      }
+      const count = Object.keys(saved).length
+      let updated
+      if (count) {
+        updated = await saveLab({ id: entry.id, dates: { ...entry.dates, ...saved } })
+        setDateDrafts(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !(id in saved))))
+      }
+      if (failed.length === 0) {
+        toast(`Saved ${count} lab date${count === 1 ? '' : 's'}.`, 'success')
+      } else {
+        toast(`${count ? `Saved ${count}. ` : ''}Could not save ${failed.map(f => f.name).join(', ')}: ${failed[0].err.message}`, 'error')
+      }
       await loadOverrides()
-      onAdded?.(updated)
-    } catch (err) {
-      toast(`Could not update ${sec?.name ?? 'the period'}: ${err.message}`, 'error')
+      if (updated) onAdded?.(updated)
     } finally {
       setBusy(false)
     }
@@ -278,8 +315,8 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {sections.length > 0 && assignmentId && (
-            <Button variant="ghost" size="sm" icon={Plus} onClick={toggleOpen} aria-expanded={open}>
-              {open ? 'Close' : 'Add a period'}
+            <Button variant="ghost" size="sm" icon={CalendarDays} onClick={toggleOpen} aria-expanded={open}>
+              {open ? 'Close' : 'Periods & dates'}
             </Button>
           )}
           <button
@@ -312,47 +349,26 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
               {coveredSectionIds.size > 0 && (
                 <div className="space-y-1">
                   <FieldLabel>Periods on this assignment</FieldLabel>
-                  {[...coveredSectionIds].map(id => {
+                  {sortedCovered.map(id => {
                     const sec = sections.find(s => s.id === id)
-                    const editing = editingSectionId === id
+                    const saved = entry.dates?.[id] ?? ''
+                    const value = dateDrafts[id] ?? saved
+                    const changed = !!dateDrafts[id] && dateDrafts[id] !== saved
                     return (
                       <div key={id} className="flex items-center justify-between gap-3 text-sm">
-                        <span className="text-[var(--color-text-body)]">{sec?.name ?? id}</span>
-                        {editing ? (
-                          <div className="flex items-center gap-1.5">
+                        <span className="text-[var(--color-text-body)]">
+                          {sec?.name ?? id}
+                          {changed && <span className="ml-1.5 text-xs text-[var(--color-info)]">• unsaved</span>}
+                        </span>
+                          <div className="flex items-center gap-1">
                             <TextField
                               type="date"
-                              value={editSectionDate}
-                              onChange={setEditSectionDate}
-                              className="max-w-[9rem]"
+                              value={value}
+                              onChange={v => setDateDrafts(prev => ({ ...prev, [id]: v }))}
+                              disabled={busy}
+                              className="max-w-[9.5rem]"
                               aria-label={`${sec?.name ?? 'this period'}'s lab date`}
                             />
-                            <Button size="sm" variant="ghost" onClick={() => handleEditSectionDate(id)} disabled={busy}>
-                              Save
-                            </Button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingSectionId(null)}
-                              disabled={busy}
-                              title="Cancel"
-                              aria-label={`Cancel editing ${sec?.name ?? 'this period'}'s lab date`}
-                              className="p-1 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-subtle)]"
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => { setEditingSectionId(id); setEditSectionDate(entry.dates?.[id] ?? '') }}
-                              disabled={busy}
-                              title={`Edit ${sec?.name ?? 'this period'}'s lab date`}
-                              aria-label={`Edit ${sec?.name ?? 'this period'}'s lab date`}
-                              className="p-1 rounded-[var(--radius-control)] text-[var(--color-text-muted)] hover:text-[var(--color-text-body)] hover:bg-[var(--color-bg-subtle)]"
-                            >
-                              <Pencil size={13} />
-                            </button>
                             <button
                               type="button"
                               onClick={() => handleRemoveSection(id)}
@@ -364,10 +380,23 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
                               <Trash2 size={13} />
                             </button>
                           </div>
-                        )}
                       </div>
                     )
                   })}
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    {changedDates.length > 0 && (
+                      <Button size="sm" variant="ghost" onClick={() => setDateDrafts({})} disabled={busy}>
+                        Undo changes
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={saveDates} disabled={busy || changedDates.length === 0}>
+                      {busy && changedDates.length > 0 ? 'Saving…'
+                        : changedDates.length > 1 ? `Save ${changedDates.length} dates` : 'Save dates'}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Saving moves each period’s professionalism dates{!isStandalone(entry) && entry.journalAssignmentId ? ' and its journal due and close dates' : ''} in Canvas.
+                  </p>
                 </div>
               )}
               {availableSections.length === 0 ? (
