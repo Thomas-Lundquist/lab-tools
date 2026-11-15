@@ -23,7 +23,7 @@ import { mapLimit } from '../../utils/mapLimit.js'
 import { loadJournalUndo, runJournalUndo } from './labRemoval.js'
 import { isProfessionalismAssignment, journalGradedGaps } from './scoring.js'
 import {
-  STANDALONE, JournalSelect, ModulePicker, SCOPE_OPTIONS, sectionsInScope, inferScope,
+  STANDALONE, JournalSelect, ModulePicker, SCOPE_OPTIONS, sectionsInScope, describeScope,
   professionalismOverrideDates, journalOverrideDates,
 } from './LabFormFields.jsx'
 import EditLabModal from './EditLabModal.jsx'
@@ -57,16 +57,6 @@ export function findDuplicateAssignments(title, assignments) {
   return assignments.filter(a => normalizeTitle(a.name) === target)
 }
 
-// A short scope summary for a row, built on the same inference EditLabModal
-// uses to seed its Scope picker — see LabFormFields.jsx's inferScope.
-function scopeBadge(assignment, courseSetup) {
-  const scope = inferScope(assignment, courseSetup)
-  if (scope === 'all') return 'All periods'
-  if (scope === 'A') return 'A day'
-  if (scope === 'B') return 'B day'
-  if (scope === 'custom') return 'Custom'
-  return null
-}
 
 // Strips a trailing "Lab" from an existing journal's name, then the full
 // literal Professionalism assignment title is prefilled from it —
@@ -115,7 +105,8 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
   const journal = assignments.find(a => a.id === entry.journalAssignmentId)
   const professionalism = assignments.find(a => a.id === entry.professionalismAssignmentId)
   const assignmentId = entry.professionalismAssignmentId
-  const badge = scopeBadge(professionalism, courseSetup)
+  // Who it's assigned to, in words (labFormHelpers.js's describeScope).
+  const badge = describeScope(professionalism, courseSetup, sections)
 
   const [open, setOpen]           = useState(false)
   const [overrides, setOverrides] = useState(null)   // null = not loaded yet
@@ -289,8 +280,11 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
               {isStandalone(entry) ? 'Standalone' : 'Pairing'}
             </span>
             {badge && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] whitespace-nowrap">
-                {badge}
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full bg-[var(--color-bg-hover)] whitespace-nowrap ${badge.noDayType.length ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-muted)]'}`}
+                title={badge.noDayType.length ? `${badge.noDayType.join(', ')} ${badge.noDayType.length === 1 ? 'has' : 'have'} no A/B day set in Course Settings` : undefined}
+              >
+                {badge.label}{badge.noDayType.length > 0 && ' · A/B day not set'}
               </span>
             )}
           </div>

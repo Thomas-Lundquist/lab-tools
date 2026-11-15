@@ -5,7 +5,7 @@ import { STANDALONE } from './labFormHelpers.js'
 // (scope, override dates) lives in labFormHelpers.js instead — re-exported
 // here so call sites can import everything from one place.
 export {
-  STANDALONE, SCOPE_OPTIONS, sectionsInScope, inferScope,
+  STANDALONE, SCOPE_OPTIONS, sectionsInScope, inferScope, describeScope,
   professionalismOverrideDates, journalOverrideDates,
 } from './labFormHelpers.js'
 

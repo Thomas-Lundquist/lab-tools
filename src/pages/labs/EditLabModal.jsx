@@ -11,7 +11,7 @@ import { createOverride, updateOverride, deleteOverride, getOverrides } from '..
 import { saveLab } from '../../storage/setup.js'
 import { isProfessionalismAssignment } from './scoring.js'
 import {
-  STANDALONE, JournalSelect, ModulePicker, SCOPE_OPTIONS, inferScope, journalOverrideDates,
+  STANDALONE, JournalSelect, ModulePicker, SCOPE_OPTIONS, inferScope, describeScope, journalOverrideDates,
 } from './LabFormFields.jsx'
 import { reconcileScope } from './scopeDiff.js'
 
@@ -43,8 +43,12 @@ export default function EditLabModal({ entry, assignment, assignments, modules, 
     .filter(a => !isProfessionalismAssignment(a.name))
     .sort((a, b) => (b.published - a.published) || a.name.localeCompare(b.name, undefined, { numeric: true }))
 
-  const scopeOptions = scope === 'custom'
-    ? [{ value: 'custom', label: 'Mixed: choose one to apply to every period' }, ...SCOPE_OPTIONS]
+  // What it's assigned to now, in words. When that isn't one of the three
+  // choices (a lab run on both A and B days, say), it's offered as-is first:
+  // keeping it changes nothing.
+  const [current] = useState(() => describeScope(assignment, courseSetup, sections))
+  const scopeOptions = originalScope === 'custom'
+    ? [{ value: 'custom', label: `Keep as is: ${current?.label ?? 'current periods'}` }, ...SCOPE_OPTIONS]
     : SCOPE_OPTIONS
 
   async function handleSave() {
@@ -164,9 +168,9 @@ export default function EditLabModal({ entry, assignment, assignments, modules, 
         <div>
           <FieldLabel htmlFor="edit-scope">Assign to</FieldLabel>
           <Select id="edit-scope" value={scope} onChange={setScope} options={scopeOptions} />
-          {scope === 'custom' && (
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              This assignment’s periods are on a mix of A and B days. Choose All periods, A day, or B day to put them on one schedule.
+          {current?.noDayType.length > 0 && (
+            <p className="mt-1 text-xs text-[var(--color-warning)]">
+              {current.noDayType.join(', ')} {current.noDayType.length === 1 ? 'has' : 'have'} no A/B day set. Set it in Course Settings › Periods: A Day / B Day.
             </p>
           )}
         </div>

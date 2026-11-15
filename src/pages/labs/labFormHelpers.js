@@ -45,6 +45,35 @@ export function inferScope(assignment, courseSetup) {
   return 'custom'
 }
 
+// What a tracked assignment is actually assigned to, in words, for the list
+// badge and EditLabModal. inferScope answers "which of the three picker
+// choices is this?" and falls back to 'custom'; this describes what's there
+// instead, so a lab run on both A and B days doesn't read as something wrong.
+//   { label, kind: 'all' | 'A' | 'B' | 'periods' | 'students' | 'none',
+//     noDayType: [names of covered periods with no A/B day in Course Settings] }
+// `sections` is the course's sections in display order ({ id, name }).
+export function describeScope(assignment, courseSetup, sections = []) {
+  if (!assignment) return null
+  const none = []
+  if (!assignment.onlyVisibleToOverrides) return { label: 'All periods', kind: 'all', noDayType: none }
+  const overrides = assignment.overrides ?? []
+  const ids = new Set(overrides.map(o => o.courseSectionId).filter(Boolean))
+  if (ids.size === 0) {
+    return overrides.some(o => o.studentIds?.length)
+      ? { label: 'Individual students', kind: 'students', noDayType: none }
+      : { label: 'No periods', kind: 'none', noDayType: none }
+  }
+  const known = sections.filter(s => ids.has(s.id))
+  const covered = [...known, ...[...ids].filter(id => !sections.some(s => s.id === id)).map(id => ({ id, name: id }))]
+  const dayOf = s => courseSetup?.sections?.[s.id]?.dayType
+  const noDayType = covered.filter(s => dayOf(s) !== 'A' && dayOf(s) !== 'B').map(s => s.name)
+  if (sections.length > 0 && sections.every(s => ids.has(s.id))) return { label: 'All periods', kind: 'all', noDayType }
+  const days = new Set(covered.map(dayOf))
+  if (days.size === 1 && days.has('A')) return { label: 'A day', kind: 'A', noDayType }
+  if (days.size === 1 && days.has('B')) return { label: 'B day', kind: 'B', noDayType }
+  return { label: covered.map(s => s.name).join(', '), kind: 'periods', noDayType }
+}
+
 // ISO for the end (23:59) and start (00:00) of a YYYY-MM-DD date string, in the
 // browser's local zone, matching how the form writes section override dates.
 function endOfDayIso(dateStr) {
