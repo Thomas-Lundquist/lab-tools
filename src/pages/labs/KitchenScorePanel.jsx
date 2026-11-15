@@ -516,8 +516,8 @@ export default function KitchenScorePanel({
     <div className="space-y-6">
       {/* Working context: pick the lab + period ONCE; both persist across tabs. */}
       <Card className="space-y-3">
-        <div className="max-w-xl">
-          <div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[14rem] max-w-xl">
             <FieldLabel htmlFor="lab">Lab</FieldLabel>
             <Select id="lab" value={labId ?? ''} onChange={id => onSelect(id, '')}>
               <option value="">Select a lab</option>
@@ -526,6 +526,11 @@ export default function KitchenScorePanel({
               ))}
             </Select>
           </div>
+          {boardId && (
+            <Button variant="secondary" icon={Monitor} onClick={() => navigate('rotation', { board: boardId })}>
+              Open Kitchen Board
+            </Button>
+          )}
         </div>
 
         {/* Periods as buttons, each showing whether it's committed. */}
@@ -558,12 +563,6 @@ export default function KitchenScorePanel({
               </div>
             )}
           </div>
-        )}
-
-        {boardId && (
-          <Button variant="secondary" size="sm" icon={Monitor} onClick={() => navigate('rotation', { board: boardId })}>
-            Open kitchen board
-          </Button>
         )}
       </Card>
 
@@ -630,17 +629,23 @@ export default function KitchenScorePanel({
 
       {!rosterLoading && entry && sectionId && roster.length > 0 && (
         <>
-          {/* Whole-class comment: posted, labeled, to every present student. */}
-          <Card className="border-2 border-[var(--color-border-strong)] space-y-1.5">
-            <label htmlFor="class-comment" className="block text-sm font-bold text-[var(--color-text-body)]">Whole class comment</label>
-            <textarea
-              id="class-comment"
-              rows={2}
-              value={section.classComment ?? ''}
-              onChange={e => applySection(s => setClassComment(s, e.target.value))}
-              placeholder="Optional. Posts to every present student as “Whole class comments: …”"
-              className="w-full text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)]"
-            />
+          {/* Whole-class comment: posted, labeled, to every present student.
+              Same header-block construction as the kitchen cards below. */}
+          <Card padding="none" className="overflow-hidden border-2 border-[var(--color-border-strong)]">
+            <div className="flex items-center justify-between gap-3 px-4 py-2 bg-[var(--color-bg-hover)] border-b-2 border-[var(--color-border-strong)]">
+              <label htmlFor="class-comment" className="text-sm font-bold text-[var(--color-text-body)]">Whole Class Comment</label>
+              <span className="text-xs text-[var(--color-text-muted)]">Optional · sent to every present student</span>
+            </div>
+            <div className="px-4 py-3">
+              <textarea
+                id="class-comment"
+                rows={3}
+                value={section.classComment ?? ''}
+                onChange={e => applySection(s => setClassComment(s, e.target.value))}
+                placeholder="Feedback for the whole class on today’s lab"
+                className="block w-full resize-y text-sm px-3 py-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)] placeholder:text-[var(--color-text-muted)]"
+              />
+            </div>
           </Card>
 
           {kitchenNumbers.map(k => {
@@ -689,9 +694,9 @@ export default function KitchenScorePanel({
                     rows={1}
                     value={section.kitchens[k]?.comment ?? ''}
                     onChange={e => applySection(s => setKitchenComment(s, k, e.target.value))}
-                    placeholder={`Kitchen ${k} comment (optional)`}
+                    placeholder={`Kitchen Comment (optional): sent to everyone in Kitchen ${k}`}
                     aria-label={`Comment for everyone in Kitchen ${k}`}
-                    className="w-full text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)]"
+                    className="block w-full resize-y text-sm px-3 py-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)] placeholder:text-[var(--color-text-muted)]"
                   />
 
                   {/* Roster for this kitchen. */}
