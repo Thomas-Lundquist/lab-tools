@@ -1,36 +1,43 @@
 // Rotating seats, the saved original, and one-step undo. Ported from
 // ../kitchen-rotator/js/rotation.js. Every function mutates the state it's
 // given; callers pass a clone (storage/rotation.js's updateRotation).
-import { activeKitchenIdxs, staffedKitchenIdxs, clearAbsences, seatedIds, MAX_KITCHEN } from './model.js'
+import { activeKitchenIdxs, staffedKitchenIdxs, seatedIds, dayView, MAX_KITCHEN } from './model.js'
 import { advanceCursors } from './duties.js'
 import { buildRotationRecord } from './history.js'
 
 // One rotation of one block: everyone moves to the next job (the last seat
-// wraps to the top), today's attendance lapses, and the duty and sink cursors
-// move on if anybody was in. Uses active, not staffed: a kitchen whose whole
-// crew is out still turns, or they'd come back to the wrong jobs.
-export function advanceBlock(state, blockId, view) {
+// wraps to the top), and the duty and sink cursors move on if anybody was in
+// last session. Uses active, not staffed: a kitchen whose whole crew is out
+// still turns, or they'd come back to the wrong jobs.
+//
+// Rotation happens at the START of class (DECISIONS.md, 2026-11-14), so it
+// doesn't clear attendance: marks taken before rotating are today's, and the
+// rotator's own marks lapse overnight anyway (expireAbsences). `hadStaff` is
+// whether last session had anyone in (from its record, history.js's
+// recordHadStaff); left out, it's read from the current marks.
+export function advanceBlock(state, blockId, view, { hadStaff } = {}) {
   const block = state.blocks[blockId]
   if (!block) return
-  // Read BEFORE the marks are cleared: afterwards an all-absent class looks full.
-  const hadStaff = staffedKitchenIdxs(block, view).length > 0
+  const staffed = hadStaff ?? staffedKitchenIdxs(block, view).length > 0
   for (const ki of activeKitchenIdxs(block)) {
     const s = block.kitchens[ki].students.slice()
     if (s.length > 1) s.unshift(s.pop())
     block.kitchens[ki].students = s
   }
-  clearAbsences(block)
-  advanceCursors(state, blockId, hadStaff)
+  advanceCursors(state, blockId, staffed)
 }
 
-// Rotates a set of blocks (one day, or one card's Advance) and returns the
-// history records of what they just finished. Every record is built before any
-// block advances: the day-wide duty assignment reads every block on the day,
-// so advancing A1 first would change what A2 and A3 are recorded as having done.
-export function rotateBlocks(state, ids, { batchId, today, views = {} }) {
-  const records = ids.map(id => buildRotationRecord(state, id, { batchId, today, views })).filter(Boolean)
-  ids.forEach(id => advanceBlock(state, id, views[id]))
-  return records
+// Rotates a set of blocks (one day, or one card's Advance) at the start of
+// class and returns today's records: the jobs, duties and sink each class is
+// about to do. Every block advances before any record is built, since the
+// day-wide duty assignment reads every block on the day. `atts` is today's
+// attendance per block (model.js's dayView); `prevHadStaff` per block says
+// whether last session had anyone in. Today's records then follow attendance
+// for the rest of the day (history.js's refreshTodaysRecord).
+export function rotateBlocks(state, ids, { batchId, today, atts = {}, prevHadStaff = {} }) {
+  ids.forEach(id => advanceBlock(state, id, undefined, { hadStaff: prevHadStaff[id] ?? true }))
+  const views = Object.fromEntries(Object.keys(state.blocks).map(id => [id, dayView(state.blocks[id], atts[id] ?? null)]))
+  return ids.map(id => buildRotationRecord(state, id, { batchId, today, views, allowEmpty: true })).filter(Boolean)
 }
 
 // --- undo: one step, in memory only ---

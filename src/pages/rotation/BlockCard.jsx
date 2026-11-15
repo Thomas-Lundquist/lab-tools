@@ -74,7 +74,6 @@ export default function BlockCard({ state, blockId, roster, display, actions, vi
               { label: 'Rotation history', onClick: () => actions.history(blockId) },
               { label: 'Save as original', onClick: () => actions.saveOriginal(blockId), disabled: nobodySeated },
               { label: 'Restore to original', onClick: () => actions.restoreOriginal(blockId), disabled: !block.kitchens.some(k => k.original.length) },
-              { label: homeFromSettings ? 'Reshuffle (home kitchens are set in Course Settings)' : 'Reshuffle into kitchens…', onClick: () => actions.shuffle(blockId), disabled: !ready || homeFromSettings },
               { label: 'Remove this class…', onClick: () => actions.remove(blockId), danger: true },
             ]}
           />

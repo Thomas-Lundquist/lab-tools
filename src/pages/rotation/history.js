@@ -1,4 +1,5 @@
-// Participation records: what each class did on each rotated day. Ported from
+// Participation records: what each class did on each rotated day, written when
+// it rotates at the start of class and kept current through that day. Ported from
 // ../kitchen-rotator/js/history.js. One synced document per class
 // (`rotationHistory/<blockId>`, storage/rotation.js) so a rotation only ever
 // rewrites its own class's records, and a capped size keeps each document small.
@@ -27,14 +28,18 @@ export function newBatchId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 }
 
-// Snapshot of what a block JUST FINISHED, before it advances. Null for a class
-// with nobody in, so prep periods and all-absent days never reach the records.
-export function buildRotationRecord(state, blockId, { batchId, today, views = {} }) {
+// What a class is doing today: its jobs, duties and sink as they stand, with
+// today's absences and visitors. Written when the class rotates at the start of
+// class, then kept in step with attendance for the rest of the day
+// (refreshTodaysRecord). Null for a class with nobody seated (a prep period).
+// A seated class with nobody in yet gets an empty record only with
+// `allowEmpty`, so the day still counts as rotated and later attendance fills it.
+export function buildRotationRecord(state, blockId, { batchId, today, views = {}, allowEmpty = false }) {
   const block = state.blocks[blockId]
   if (!block) return null
   const view = views[blockId] ?? dayView(block)
   const staffed = staffedKitchenIdxs(block, view)
-  if (staffed.length === 0) return null
+  if (staffed.length === 0 && !(allowEmpty && block.kitchens.some(k => k.students.length))) return null
   const { duties, sinks } = blockDisplay(state, blockId, { ...views, [blockId]: view })
   return {
     _id: blockId,
@@ -72,6 +77,27 @@ export function removeBatch(history, batchId) {
 export function rotatedOn(history, day) {
   const last = history.records[history.records.length - 1]
   return !!last && last.d === day
+}
+
+// Whether a recorded session had anybody in. Rotation reads it from the last
+// record so an all-absent session keeps its duty for next time.
+export function recordHadStaff(rec) {
+  if (!rec) return true
+  return rec.k.some(k => k.s.some(id => !(k.ab ?? []).includes(id)))
+}
+
+// Today's record, rebuilt from the class as it stands now (attendance taken
+// after rotating, a kitchen move, a job nudge). Returns the updated history,
+// or null when there's no record for today or nothing changed — so callers
+// write only on a real change. Records from earlier days are never touched.
+export function refreshTodaysRecord(state, blockId, history, { today, views = {} }) {
+  const last = history.records[history.records.length - 1]
+  if (!last || last.d !== today) return null
+  const rebuilt = buildRotationRecord(state, blockId, { batchId: last.b, today, views, allowEmpty: true })
+  if (!rebuilt) return null
+  const { _id, ...rec } = rebuilt // eslint-disable-line no-unused-vars
+  if (JSON.stringify(rec) === JSON.stringify(last)) return null
+  return { records: [...history.records.slice(0, -1), rec] }
 }
 
 // --- participation CSV ---

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { freshState, blankBlock, normalizeState, setAbsent, seatOrder, blockLabel, staffedKitchenIdxs } from './model.js'
 import { assignDayDuties, blockDisplay } from './duties.js'
 import { advanceBlock, rotateBlocks, snapshotBlocks, applyUndo, saveOriginal, restoreOriginal } from './rotation.js'
-import { appendRecords, emptyHistory, removeBatch, participationRows, HISTORY_CAP } from './history.js'
+import { appendRecords, emptyHistory, removeBatch, participationRows, HISTORY_CAP, recordHadStaff, refreshTodaysRecord } from './history.js'
 import { computeGroupCount, seatShuffled, placeStudent, nudgeStudent, removeDeparted, unseatedIds, matchSection, displayNames, shortName } from './roster.js'
 
 const TODAY = '2026-11-04'
@@ -31,13 +31,23 @@ test('advancing moves everyone down one job and the bottom student to the top', 
   assert.deepEqual(students(s, 'A1'), ['c', 'd', 'a', 'b'])
 })
 
-test('a rotation clears attendance and moves the duty and sink cursors', () => {
+test('a rotation moves the duty and sink cursors and keeps today’s attendance', () => {
   const s = setup({ A1: [['a', 'b'], ['c']] }, ['Sweep', 'Mop'])
   setAbsent(s.blocks.A1, 'a', true, TODAY)
   advanceBlock(s, 'A1')
   assert.equal(s.blocks.A1.dutyIndex, 1)
   assert.equal(s.blocks.A1.centerSink, 1)
-  assert.deepEqual(s.blocks.A1.absent, {})
+  assert.deepEqual(s.blocks.A1.absent, { a: true }, 'marks taken before rotating at the start of class are today’s')
+})
+
+test('an all-absent last session keeps its duty when the class rotates next time', () => {
+  const s = setup({ A1: [['a', 'b']] }, ['Sweep', 'Mop'])
+  rotateBlocks(s, ['A1'], { batchId: 'b1', today: TODAY, prevHadStaff: { A1: false } })
+  assert.deepEqual(students(s, 'A1'), ['b', 'a'], 'seats still turn')
+  assert.equal(s.blocks.A1.dutyIndex, 0)
+  assert.equal(recordHadStaff({ k: [{ s: ['a', 'b'], ab: ['a', 'b'] }] }), false)
+  assert.equal(recordHadStaff({ k: [{ s: ['a', 'b'], ab: ['a'] }] }), true)
+  assert.equal(recordHadStaff(undefined), true)
 })
 
 test('a class with everyone out still turns its seats but keeps its duty', () => {
@@ -50,13 +60,14 @@ test('a class with everyone out still turns its seats but keeps its duty', () =>
   assert.equal(s.blocks.A1.centerSink, 0)
 })
 
-test('rotating a day records every class before any advances, and undo puts it all back', () => {
+test('rotating a day moves every class first, then records what each does today; undo puts it all back', () => {
   const s = setup({ A1: [['a', 'b']], A2: [['c', 'd']], A3: [] }, ['Sweep', 'Mop'])
-  const before = { A1: blockDisplay(s, 'A1').duties, A2: blockDisplay(s, 'A2').duties }
   const snap = snapshotBlocks(s, ['A1', 'A2', 'A3'], 'Rotate A Day', 'batch1')
   const records = rotateBlocks(s, ['A1', 'A2', 'A3'], { batchId: 'batch1', today: TODAY })
   assert.equal(records.length, 2, 'A3 is empty, so it is not recorded')
-  assert.equal(records[1].k[0].du, before.A2[0], 'A2 recorded the duty it actually did, not one reassigned by A1 advancing')
+  const after = { A1: blockDisplay(s, 'A1').duties, A2: blockDisplay(s, 'A2').duties }
+  assert.equal(records[1].k[0].du, after.A2[0], 'A2 recorded the duty it is doing today, after every class moved')
+  assert.deepEqual(records[0].k[0].s, ['b', 'a'], 'today’s jobs, not last session’s')
   assert.deepEqual(students(s, 'A1'), ['b', 'a'])
   applyUndo(s, snap)
   assert.deepEqual(students(s, 'A1'), ['a', 'b'])
@@ -153,12 +164,20 @@ test('paired kitchens take turns at the center sink; an unpaired one keeps it', 
 
 // --- history ---
 
-test('records hold ids in display order with absences, and are capped per class', () => {
-  const s = setup({ A1: [['a', 'b', 'c']] }, ['Sweep'])
+test('records hold ids in display order with absences, follow attendance through the day, and are capped per class', () => {
+  const s = setup({ A1: [['c', 'a', 'b']] }, ['Sweep'])
+  const [first] = rotateBlocks(s, ['A1'], { batchId: 'b1', today: TODAY })
+  assert.deepEqual(first.k[0].s, ['b', 'c', 'a'], 'today’s jobs after rotating')
+  assert.deepEqual(first.k[0].ab, [])
+  // Attendance taken after rotating updates today's record, and only today's.
   setAbsent(s.blocks.A1, 'a', true, TODAY)
-  const [rec] = rotateBlocks(s, ['A1'], { batchId: 'b1', today: TODAY })
+  const refreshed = refreshTodaysRecord(s, 'A1', appendRecords(emptyHistory(), [first]), { today: TODAY })
+  const rec = refreshed.records[0]
   assert.deepEqual(rec.k[0].s, ['b', 'c', 'a'])
   assert.deepEqual(rec.k[0].ab, ['a'])
+  assert.equal(rec.b, 'b1', 'same record, same batch')
+  assert.equal(refreshTodaysRecord(s, 'A1', refreshed, { today: TODAY }), null, 'no change, no write')
+  assert.equal(refreshTodaysRecord(s, 'A1', refreshed, { today: '2026-11-05' }), null, 'an earlier day is never touched')
   let h = appendRecords(emptyHistory(), [rec])
   assert.equal(h.records[0]._id, undefined)
   const rows = participationRows([{ label: 'A1', day: 'A', records: h.records }], id => id.toUpperCase())

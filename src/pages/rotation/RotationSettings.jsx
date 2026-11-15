@@ -78,7 +78,7 @@ export default function RotationSettings({ state, recordCount, onChange, onExpor
       <Card padding="lg">
         <h2 className="text-base font-semibold text-[var(--color-text-body)]">Participation Records</h2>
         <p className="text-sm text-[var(--color-text-muted)] mt-1 mb-4">
-          Each rotation records what the class just finished, so rotate at the end of a session, not the start. The last 90 rotations per class are kept and sync across your devices. A class’s history is in its ⋮ menu.
+          Rotate at the start of class. Each rotation records what the class does that day, and the record follows attendance until the day ends. The last 90 rotations per class are kept and sync across your devices. A class’s history is in its ⋮ menu.
         </p>
         <p className="text-sm text-[var(--color-text-body)] mb-3">
           {recordCount == null ? 'Counting…' : recordCount === 0 ? 'No rotations recorded yet.' : `${recordCount} rotation${recordCount === 1 ? '' : 's'} recorded.`}

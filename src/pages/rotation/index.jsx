@@ -10,10 +10,10 @@ import { useToast } from '../../components/Toast.jsx'
 import { useRoute, navigate } from '../../utils/nav.js'
 import { keyPrefix } from '../../storage/kv.js'
 import { getRotation, updateRotation, getHistory, saveHistory, clearHistory } from '../../storage/rotation.js'
-import { blankBlock, blockLabel, allBlockIds, staffedKitchenIdxs, setAbsent, clearAbsences, todayStamp, isAbsent, dayView } from './model.js'
+import { blankBlock, blockLabel, allBlockIds, setAbsent, clearAbsences, todayStamp, isAbsent, dayView } from './model.js'
 import { blockDisplay } from './duties.js'
 import { rotateBlocks, snapshotBlocks, applyUndo, saveOriginal, restoreOriginal } from './rotation.js'
-import { appendRecords, removeBatch, rotatedOn, newBatchId, participationRows, toCSV } from './history.js'
+import { appendRecords, removeBatch, rotatedOn, newBatchId, participationRows, toCSV, recordHadStaff, refreshTodaysRecord } from './history.js'
 import { seatShuffled, placeStudent, nudgeStudent, unseatStudent, removeDeparted, reconcileSeating } from './roster.js'
 import { useRosters } from './useRosters.js'
 import { useLabLink } from './useLabLink.js'
@@ -146,6 +146,21 @@ export default function RotationPage() {
   ), [link])
   const views = useMemo(() => viewsFor(state), [viewsFor, state])
 
+  // Today's record follows the class through the day: attendance is usually
+  // taken after rotating at the start of class, and a visit or job nudge can
+  // come later still. Writes only when something actually changed.
+  useEffect(() => {
+    if (!state) return
+    const today = todayStamp()
+    for (const id of blockIds) {
+      if (!histories[id]) continue
+      const next = refreshTodaysRecord(state, id, histories[id], { today, views })
+      if (!next) continue
+      setHistories(hs => ({ ...hs, [id]: next }))
+      saveHistory(id, next)
+    }
+  }, [state, views, histories, blockIds])
+
   const nameOf = useCallback((blockId, uid) => rosters[blockId]?.names[uid] ?? 'Former student', [rosters])
 
   // --- rotation ---
@@ -153,7 +168,9 @@ export default function RotationPage() {
   async function rotate(ids, label) {
     const today = todayStamp(), batchId = newBatchId()
     let snap
-    const records = await commit(s => { snap = snapshotBlocks(s, ids, label, batchId); return rotateBlocks(s, ids, { batchId, today, views: viewsFor(s) }) })
+    const atts = Object.fromEntries(Object.keys(link).map(id => [id, link[id]?.att ?? null]))
+    const prevHadStaff = Object.fromEntries(ids.map(id => [id, recordHadStaff(histories[id]?.records.at(-1))]))
+    const records = await commit(s => { snap = snapshotBlocks(s, ids, label, batchId); return rotateBlocks(s, ids, { batchId, today, atts, prevHadStaff }) })
     const updated = {}
     for (const rec of records) {
       const h = appendRecords(await getHistory(rec._id), [rec])
@@ -167,7 +184,7 @@ export default function RotationPage() {
 
   function rotateDay(day) {
     const ids = state.slots[day].filter(Boolean)
-    const withStaff = ids.filter(id => staffedKitchenIdxs(state.blocks[id], views[id]).length > 0)
+    const withStaff = ids.filter(id => state.blocks[id].kitchens.some(k => k.students.length))
     const today = todayStamp()
     if (withStaff.length && withStaff.every(id => histories[id] && rotatedOn(histories[id], today))) {
       setModal({ type: 'confirm', title: `Rotate ${day} Day again?`, body: `You already rotated ${day} Day today. Rotating again moves everyone on another job.`, confirmLabel: 'Rotate again', onConfirm: () => rotate(ids, `Rotate ${day} Day`) })
@@ -326,7 +343,7 @@ export default function RotationPage() {
               ) : (
                 <div className="space-y-5">
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    Rotate at the <b>end</b> of each class day: it records what the class just did, then moves everyone to the next job.
+                    Rotate at the <b>start</b> of class: everyone moves to their next job, and today is recorded as attendance comes in.
                     {' '}Home kitchens come from Course Settings. On a lab day, attendance and kitchen moves come from the Grade tab.
                     {Object.values(rosters).some(r => r.status === 'error') && <button className="ml-2 underline" onClick={reloadRosters}>Retry loading rosters</button>}
                   </p>
