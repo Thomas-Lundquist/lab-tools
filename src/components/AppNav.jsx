@@ -125,7 +125,7 @@ export function BrandMark() {
            style={{ backgroundColor: 'var(--cpt-color)' }}>
         <span className="text-white text-xs font-black">C</span>
       </div>
-      <span className="text-sm font-semibold text-[var(--color-text-body)] hidden sm:block">Culinary Canvas Tools</span>
+      <span className="text-sm font-semibold text-[var(--color-text-body)] hidden sm:block">Lab Tools</span>
     </div>
   )
 }
@@ -135,7 +135,7 @@ export function BrandLogo() {
     <button
       onClick={() => navigate('home')}
       className="hover:opacity-80 transition-opacity shrink-0"
-      aria-label="Culinary Canvas Tools home"
+      aria-label="Lab Tools home"
     >
       <BrandMark />
     </button>

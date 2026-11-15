@@ -30,7 +30,7 @@ export function buildUserscript(launchUrl) {
   return [
     '// ==UserScript==',
     '// @name         Lab Tools',
-    '// @description  Opens Culinary Canvas Tools inside Canvas',
+    '// @description  Opens Lab Tools inside Canvas',
     `// @match        ${CANVAS_ORIGIN}${LAUNCH_PATH}*`,
     '// @run-at       document-end',
     '// ==/UserScript==',

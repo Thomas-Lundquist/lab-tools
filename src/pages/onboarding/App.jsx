@@ -66,7 +66,7 @@ export default function App() {
             <div className="flex items-start gap-3 bg-[var(--primary-50)] border border-[var(--primary-200)] rounded-lg p-4 mb-5">
               <ShieldCheck size={18} className="text-[var(--cpt-color-text)] shrink-0 mt-0.5" />
               <p className="text-sm text-[var(--cpt-color-text)]">
-                A PIN prevents anyone else on this computer from making changes to your Canvas courses through Culinary Canvas Tools. Recommended for shared or classroom computers.
+                A PIN prevents anyone else on this computer from making changes to your Canvas courses through Lab Tools. Recommended for shared or classroom computers.
               </p>
             </div>
 
@@ -122,7 +122,7 @@ export default function App() {
               <h2 className="text-2xl font-bold text-[var(--color-text-body)]">
                 You are all set{verifiedUser?.shortName ? `, ${verifiedUser.shortName.split(' ')[0]}` : ''}.
               </h2>
-              <p className="text-[var(--color-text-muted)] mt-2">Culinary Canvas Tools is ready to use.</p>
+              <p className="text-[var(--color-text-muted)] mt-2">Lab Tools is ready to use.</p>
             </div>
 
             {verifiedUser && (
@@ -160,7 +160,7 @@ function WelcomeScreen({ onStart, error }) {
         <div className="w-16 h-16 bg-[var(--cpt-color)] rounded-2xl mx-auto mb-6 flex items-center justify-center">
           <span className="text-white text-2xl font-black">C</span>
         </div>
-        <h1 className="text-3xl font-bold text-[var(--color-text-body)]">Culinary Canvas Tools</h1>
+        <h1 className="text-3xl font-bold text-[var(--color-text-body)]">Lab Tools</h1>
         <p className="text-[var(--color-text-muted)] mt-3 text-lg">A personal Canvas toolkit for your culinary classes.</p>
       </div>
       <div className="space-y-3 text-sm text-[var(--color-text-secondary)] text-left bg-[var(--color-bg-hover)] rounded-lg p-5">
