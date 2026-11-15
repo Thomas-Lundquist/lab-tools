@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { RotateCw, Undo2 } from 'lucide-react'
 import AppNav, { SettingsButton, BrandLogo } from '../../components/AppNav.jsx'
 import ToolShell from '../../components/ToolShell.jsx'
@@ -10,12 +10,14 @@ import { useToast } from '../../components/Toast.jsx'
 import { useRoute, navigate } from '../../utils/nav.js'
 import { keyPrefix } from '../../storage/kv.js'
 import { getRotation, updateRotation, getHistory, saveHistory, clearHistory } from '../../storage/rotation.js'
-import { blankBlock, blockLabel, allBlockIds, staffedKitchenIdxs, setAbsent, clearAbsences, todayStamp, isAbsent } from './model.js'
+import { blankBlock, blockLabel, allBlockIds, staffedKitchenIdxs, setAbsent, clearAbsences, todayStamp, isAbsent, dayView } from './model.js'
 import { blockDisplay } from './duties.js'
 import { rotateBlocks, snapshotBlocks, applyUndo, saveOriginal, restoreOriginal } from './rotation.js'
 import { appendRecords, removeBatch, rotatedOn, newBatchId, participationRows, toCSV } from './history.js'
-import { seatShuffled, placeStudent, nudgeStudent, unseatStudent, removeDeparted } from './roster.js'
+import { seatShuffled, placeStudent, nudgeStudent, unseatStudent, removeDeparted, reconcileSeating } from './roster.js'
 import { useRosters } from './useRosters.js'
+import { useLabLink } from './useLabLink.js'
+import { getSyncStatus, subscribeSyncStatus, syncNow, dismissRemoteChange } from '../../storage/sync.js'
 import BlockCard from './BlockCard.jsx'
 import FullscreenBoard from './FullscreenBoard.jsx'
 import RotationSettings from './RotationSettings.jsx'
@@ -23,9 +25,15 @@ import { ConfirmModal, StudentModal, AttendanceModal, HistoryModal, StartClassMo
 
 // Kitchen Rotation: seats students in eight kitchens, rotates them through
 // the job titles each class day, and hands out extra duties and center-sink
-// turns. Ported from ../kitchen-rotator; separate from the Labs tool by design
-// (DECISIONS.md, 2026-11-04). Nothing here writes to the gradebook: the only
-// Canvas writes are this tool's own synced documents.
+// turns. Ported from ../kitchen-rotator. Linked to the Labs tool one way
+// (DECISIONS.md, 2026-11-14): home kitchens come from Course Settings, and on a
+// lab day absences and visits come from that lab. Nothing here writes Labs data
+// or the gradebook: the only Canvas writes are this tool's own synced documents.
+
+// How often the page checks Canvas for other devices' edits while it's on
+// screen: the classroom display usually runs on a separate device nobody
+// touches, and sync otherwise only pulls when a tab comes back into view.
+const POLL_MS = 20_000
 
 const TAB_KEY = 'rotation:tab'
 const loadTab = () => { try { return localStorage.getItem(keyPrefix() + TAB_KEY) || 'A' } catch { return 'A' } }
@@ -51,8 +59,26 @@ export default function RotationPage() {
   const [modal, setModal] = useState(null)
   const [fullscreenId, setFullscreenId] = useState(null)
   const { byBlock: rosters, reload: reloadRosters } = useRosters(state)
+  const { byBlock: link, reload: reloadLink } = useLabLink(state)
 
   useEffect(() => { getRotation().then(setState) }, [])
+
+  // Keep the board live. Every finished sync (this page's poll, or a tab
+  // coming back into view) re-reads the board; useLabLink re-reads the Labs
+  // side on its own. Everything this page shows is re-read, so the app-wide
+  // "refresh" banner isn't needed here.
+  const lastSyncedAt = useSyncExternalStore(subscribeSyncStatus, () => getSyncStatus().lastSyncedAt)
+  useEffect(() => {
+    if (!lastSyncedAt) return
+    getRotation().then(setState)
+    dismissRemoteChange()
+  }, [lastSyncedAt])
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') syncNow().catch(() => {})
+    }, POLL_MS)
+    return () => clearInterval(t)
+  }, [])
 
   // Opened as #rotation?board=<blockId> (the Lab tab's "Open kitchen board"
   // shortcut): go straight to that class's fullscreen board. Closing it drops
@@ -71,10 +97,10 @@ export default function RotationPage() {
   useEffect(() => {
     const t = setInterval(() => {
       const today = todayStamp()
-      if (today !== loadedDay) { setLoadedDay(today); setLastRotation(null); getRotation().then(setState) }
+      if (today !== loadedDay) { setLoadedDay(today); setLastRotation(null); getRotation().then(setState); reloadLink() }
     }, 60000)
     return () => clearInterval(t)
-  }, [loadedDay])
+  }, [loadedDay, reloadLink])
 
   const blockIds = useMemo(() => (state ? allBlockIds(state) : []), [state])
   const blockKey = blockIds.join(',')
@@ -102,6 +128,24 @@ export default function RotationPage() {
   // Runs when a roster arrives or changes, not on every seat edit.
   }, [departedKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seat each class from its period's home kitchens in Course Settings. Runs
+  // when the home kitchens or a roster change; deterministic, so two devices
+  // doing it at once write the same seating.
+  const reconcileKey = JSON.stringify(blockIds.map(id => [id, rosters[id]?.status, rosters[id]?.sectionIds, link[id]?.home]))
+  useEffect(() => {
+    if (!state) return
+    const due = blockIds.filter(id => rosters[id]?.status === 'ready' && link[id]?.home
+      && reconcileSeating(structuredClone(state.blocks[id]), link[id].home, rosters[id].sectionIds))
+    if (!due.length) return
+    commit(s => due.forEach(id => s.blocks[id] && reconcileSeating(s.blocks[id], link[id].home, rosters[id].sectionIds)))
+  }, [reconcileKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Today, per class: who's working where (model.js's dayView).
+  const viewsFor = useCallback(s => Object.fromEntries(
+    Object.keys(s?.blocks ?? {}).map(id => [id, dayView(s.blocks[id], link[id]?.att ?? null)]),
+  ), [link])
+  const views = useMemo(() => viewsFor(state), [viewsFor, state])
+
   const nameOf = useCallback((blockId, uid) => rosters[blockId]?.names[uid] ?? 'Former student', [rosters])
 
   // --- rotation ---
@@ -109,7 +153,7 @@ export default function RotationPage() {
   async function rotate(ids, label) {
     const today = todayStamp(), batchId = newBatchId()
     let snap
-    const records = await commit(s => { snap = snapshotBlocks(s, ids, label, batchId); return rotateBlocks(s, ids, { batchId, today }) })
+    const records = await commit(s => { snap = snapshotBlocks(s, ids, label, batchId); return rotateBlocks(s, ids, { batchId, today, views: viewsFor(s) }) })
     const updated = {}
     for (const rec of records) {
       const h = appendRecords(await getHistory(rec._id), [rec])
@@ -123,7 +167,7 @@ export default function RotationPage() {
 
   function rotateDay(day) {
     const ids = state.slots[day].filter(Boolean)
-    const withStaff = ids.filter(id => staffedKitchenIdxs(state.blocks[id]).length > 0)
+    const withStaff = ids.filter(id => staffedKitchenIdxs(state.blocks[id], views[id]).length > 0)
     const today = todayStamp()
     if (withStaff.length && withStaff.every(id => histories[id] && rotatedOn(histories[id], today))) {
       setModal({ type: 'confirm', title: `Rotate ${day} Day again?`, body: `You already rotated ${day} Day today. Rotating again moves everyone on another job.`, confirmLabel: 'Rotate again', onConfirm: () => rotate(ids, `Rotate ${day} Day`) })
@@ -282,12 +326,14 @@ export default function RotationPage() {
               ) : (
                 <div className="space-y-5">
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    Rotate at the <b>end</b> of each class day: it records what the class just did, then moves everyone to the next job. Tap a student for attendance or to move them.
+                    Rotate at the <b>end</b> of each class day: it records what the class just did, then moves everyone to the next job.
+                    {' '}Home kitchens come from Course Settings; on a lab day, absences and visits come from the Lab tab.
                     {Object.values(rosters).some(r => r.status === 'error') && <button className="ml-2 underline" onClick={reloadRosters}>Retry loading rosters</button>}
                   </p>
                   {state.slots[day].map((id, pos) => id ? (
                     <BlockCard key={id} state={state} blockId={id} roster={rosters[id] ?? { status: 'loading', sectionIds: [], names: {} }}
-                      display={blockDisplay(state, id)} actions={actions} />
+                      view={views[id]} link={link[id] ?? null}
+                      display={blockDisplay(state, id, views)} actions={actions} />
                   ) : (
                     <Card key={`empty-${pos}`} padding="md" className="flex flex-wrap items-center justify-between gap-3 border-dashed">
                       <span className="text-sm text-[var(--color-text-muted)]">{day}{pos + 1} · prep period</span>
@@ -311,6 +357,7 @@ export default function RotationPage() {
         const { blockId: id, uid } = modal
         return (
           <StudentModal block={state.blocks[id]} uid={uid} name={nameOf(id, uid)} onClose={() => setModal(null)}
+            view={views[id]} homeFromSettings={!!link[id]?.home} labName={link[id]?.lab?.name ?? null}
             onAbsent={on => commit(s => setAbsent(s.blocks[id], uid, on, todayStamp()))}
             onPlace={async ki => { const ok = await commit(s => placeStudent(s.blocks[id], uid, ki)); if (!ok) toast(`Kitchen ${ki + 1} is full (5).`, 'warning') }}
             onNudge={delta => commit(s => nudgeStudent(s.blocks[id], uid, delta))}
@@ -331,7 +378,7 @@ export default function RotationPage() {
       )}
       {fullscreenId && state?.blocks[fullscreenId] && (
         <FullscreenBoard state={state} blockId={fullscreenId} names={rosters[fullscreenId]?.names ?? {}}
-          display={blockDisplay(state, fullscreenId)} onClose={closeFullscreen} />
+          view={views[fullscreenId]} display={blockDisplay(state, fullscreenId, views)} onClose={closeFullscreen} />
       )}
     </>
   )

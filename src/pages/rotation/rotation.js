@@ -9,11 +9,11 @@ import { buildRotationRecord } from './history.js'
 // wraps to the top), today's attendance lapses, and the duty and sink cursors
 // move on if anybody was in. Uses active, not staffed: a kitchen whose whole
 // crew is out still turns, or they'd come back to the wrong jobs.
-export function advanceBlock(state, blockId) {
+export function advanceBlock(state, blockId, view) {
   const block = state.blocks[blockId]
   if (!block) return
   // Read BEFORE the marks are cleared: afterwards an all-absent class looks full.
-  const hadStaff = staffedKitchenIdxs(block).length > 0
+  const hadStaff = staffedKitchenIdxs(block, view).length > 0
   for (const ki of activeKitchenIdxs(block)) {
     const s = block.kitchens[ki].students.slice()
     if (s.length > 1) s.unshift(s.pop())
@@ -27,9 +27,9 @@ export function advanceBlock(state, blockId) {
 // history records of what they just finished. Every record is built before any
 // block advances: the day-wide duty assignment reads every block on the day,
 // so advancing A1 first would change what A2 and A3 are recorded as having done.
-export function rotateBlocks(state, ids, { batchId, today }) {
-  const records = ids.map(id => buildRotationRecord(state, id, { batchId, today })).filter(Boolean)
-  ids.forEach(id => advanceBlock(state, id))
+export function rotateBlocks(state, ids, { batchId, today, views = {} }) {
+  const records = ids.map(id => buildRotationRecord(state, id, { batchId, today, views })).filter(Boolean)
+  ids.forEach(id => advanceBlock(state, id, views[id]))
   return records
 }
 

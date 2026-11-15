@@ -16,8 +16,11 @@
 // - A block id (A1, B3, ...) is a permanent identity; the label the teacher
 //   sees is the period it sits in now (blockLabel).
 //
-// Deliberately separate from the Labs tool: its own synced keys, its own
-// daily attendance, its own kitchens. See DECISIONS.md (2026-11-04).
+// Linked to the Labs tool, one way (DECISIONS.md, 2026-11-14): a class whose
+// period has home kitchens in Course Settings is seated from them
+// (roster.js's reconcileSeating), and on a day its period has a lab, absences
+// and visits come from that lab (dayView below). The rotator never writes Labs
+// data; it keeps its own seat order, duties and history.
 
 export const MAX_KITCHEN = 5         // seat rows per kitchen, never exceeded
 export const TARGET_KITCHEN_SIZE = 4 // ideal students per kitchen when shuffling
@@ -143,10 +146,54 @@ export function activeKitchenIdxs(block) {
   return block.kitchens.flatMap((k, i) => (k.students.length ? [i] : []))
 }
 
-// "Staffed": somebody is actually here today. A kitchen whose whole crew is
-// out can't wipe a shelf or wash a sink, so duties and the center sink use it.
-export function staffedKitchenIdxs(block) {
-  return block.kitchens.flatMap((k, i) => (k.students.some(id => !isAbsent(block, id)) ? [i] : []))
+// --- today: who is actually working in each kitchen ---
+//
+// The stored seating is each kitchen's home crew in rotation order. Today can
+// differ from it two ways, and dayView works both out without touching the
+// stored order:
+//   - absent students leave the job rows (their jobs read SPLIT);
+//   - a student moved to another kitchen for today's lab works there, after
+//     its home crew, and is flagged as visiting.
+//
+// `att` is today's attendance from the Labs tool (pages/rotation/today.js):
+//   { absent: Set<userId>, kitchen: { userId: kitchenIdx }, labName }
+// With no lab today `att` is null and the rotator's own marks
+// (block.absent) count instead. DECISIONS.md, 2026-11-14.
+//
+// Returns { kitchens: [{ working: [userId], visitors: Set }], absent: Set,
+//           source: 'lab' | 'rotator', labName }.
+export function dayView(block, att = null) {
+  const absent = att ? att.absent : new Set(Object.keys(block.absent ?? {}).filter(id => block.absent[id]))
+  const moved = att?.kitchen ?? {}
+  const kitchens = block.kitchens.map(() => ({ working: [], visitors: new Set() }))
+  const home = {}
+  block.kitchens.forEach((k, ki) => k.students.forEach(uid => {
+    home[uid] = ki
+    if (absent.has(uid)) return
+    const to = moved[uid]
+    if (to != null && to !== ki && kitchens[to]) return // working elsewhere today
+    kitchens[ki].working.push(uid)
+  }))
+  for (const [uid, to] of Object.entries(moved)) {
+    if (absent.has(uid) || !kitchens[to] || home[uid] === to) continue
+    kitchens[to].working.push(uid)
+    // Someone with no home seat isn't visiting anywhere; they just work there.
+    if (home[uid] != null) kitchens[to].visitors.add(uid)
+  }
+  return { kitchens, absent, source: att ? 'lab' : 'rotator', labName: att?.labName ?? null }
+}
+
+// "Staffed": somebody is actually working here today. A kitchen whose whole
+// crew is out can't wipe a shelf or wash a sink, so duties and the center sink
+// use it. A kitchen staffed only by visitors counts.
+export function staffedKitchenIdxs(block, view = dayView(block)) {
+  return view.kitchens.flatMap((k, i) => (k.working.length ? [i] : []))
+}
+
+// Over the 5-seat limit today: only reachable when an absent student comes
+// back after others were moved in, so it's flagged rather than prevented.
+export function overLimitIdxs(view) {
+  return view.kitchens.flatMap((k, i) => (k.working.length > MAX_KITCHEN ? [i] : []))
 }
 
 // One kitchen's students in display order: present first (they take the top

@@ -23,16 +23,26 @@ export function ConfirmModal({ title, body, confirmLabel, danger, onConfirm, onC
 }
 
 // One student: today's attendance, which kitchen, which job, or unseat.
-export function StudentModal({ block, uid, name, onAbsent, onPlace, onNudge, onUnseat, onClose }) {
+// On a lab day (`labName`) attendance is the Lab tab's, and with home kitchens
+// set in Course Settings (`homeFromSettings`) so is the kitchen; this only
+// offers what the rotator itself owns then (DECISIONS.md, 2026-11-14).
+export function StudentModal({ block, uid, name, view = null, homeFromSettings = false, labName = null, onAbsent, onPlace, onNudge, onUnseat, onClose }) {
   const ki = kitchenOf(block, uid)
   const seated = ki >= 0
-  const away = isAbsent(block, uid)
+  const away = view ? view.absent.has(uid) : isAbsent(block, uid)
+  const visitingAt = view ? view.kitchens.findIndex(k => k.visitors.has(uid)) : -1
   const at = seated ? block.kitchens[ki].students.indexOf(uid) : -1
   return (
-    <Modal title={name} subtitle={seated ? `Kitchen ${ki + 1}` : 'Not seated'} size="sm" onClose={onClose}
+    <Modal title={name} subtitle={seated ? `Kitchen ${ki + 1}${visitingAt >= 0 ? ` · visiting Kitchen ${visitingAt + 1} today` : ''}` : 'Not seated'} size="sm" onClose={onClose}
       footer={<Button onClick={onClose}>Done</Button>}>
       <div className="space-y-5">
-        {seated && (
+        {(labName || homeFromSettings) && (
+          <p className="text-xs text-[var(--color-text-muted)]">
+            {labName && <>Attendance{homeFromSettings ? ' and today’s kitchen' : ''} come from <b>{labName}</b> in the Lab tab. </>}
+            {homeFromSettings && 'Their home kitchen is set in Course Settings.'}
+          </p>
+        )}
+        {seated && !labName && (
           <div>
             <FieldLabel>Today</FieldLabel>
             <div className="flex gap-2 mt-1">
@@ -41,7 +51,7 @@ export function StudentModal({ block, uid, name, onAbsent, onPlace, onNudge, onU
             </div>
           </div>
         )}
-        <div>
+        {!homeFromSettings && <div>
           <FieldLabel>{seated ? 'Move to kitchen' : 'Seat in kitchen'}</FieldLabel>
           <div className="grid grid-cols-4 gap-2 mt-1">
             {Array.from({ length: NUM_KITCHENS }, (_, k) => {
@@ -56,12 +66,12 @@ export function StudentModal({ block, uid, name, onAbsent, onPlace, onNudge, onU
             })}
           </div>
           <p className="text-xs text-[var(--color-text-muted)] mt-1">A move puts them at the bottom job of that kitchen; the rotation brings them round.</p>
-        </div>
+        </div>}
         {seated && (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="secondary" icon={ArrowUp} disabled={at <= 0} onClick={() => onNudge(-1)}>Job up</Button>
             <Button size="sm" variant="secondary" icon={ArrowDown} disabled={at >= block.kitchens[ki].students.length - 1} onClick={() => onNudge(1)}>Job down</Button>
-            <Button size="sm" variant="ghost" icon={UserX} onClick={onUnseat}>Unseat</Button>
+            {!homeFromSettings && <Button size="sm" variant="ghost" icon={UserX} onClick={onUnseat}>Unseat</Button>}
           </div>
         )}
       </div>
@@ -134,6 +144,7 @@ export function HistoryModal({ title, history, nameOf, onExport, onClose }) {
                 <div className="space-y-1">
                   {rec.k.map(kr => {
                     const absent = new Set(kr.ab || [])
+                    const visiting = new Set(kr.v || [])
                     return (
                       <p key={kr.i} className="text-xs text-[var(--color-text-secondary)]">
                         <b className="text-[var(--color-text-body)]">K{kr.i + 1}</b>
@@ -141,7 +152,7 @@ export function HistoryModal({ title, history, nameOf, onExport, onClose }) {
                         <br />
                         {kr.s.map((uid, row) => (
                           <span key={uid} className={absent.has(uid) ? 'text-[var(--color-error)]' : ''}>
-                            {row > 0 && ', '}{nameOf(uid)} ({rec.t?.[row] || `Seat ${row + 1}`}{absent.has(uid) ? ', out' : ''})
+                            {row > 0 && ', '}{nameOf(uid)} ({rec.t?.[row] || `Seat ${row + 1}`}{absent.has(uid) ? ', out' : visiting.has(uid) ? ', visiting' : ''})
                           </span>
                         ))}
                       </p>

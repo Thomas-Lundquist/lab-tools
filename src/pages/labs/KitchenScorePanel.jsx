@@ -24,7 +24,7 @@ import {
   toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
   acceptCanvasScore, pickTeacherComment,
 } from '../../storage/labGrading.js'
-import { seedStandingKitchens, newestFirst, todaysLab, labDateFor, localToday } from '../../storage/kitchens.js'
+import { seedStandingKitchens, newestFirst, todaysLab, labDateFor, localToday, MAX_PER_KITCHEN } from '../../storage/kitchens.js'
 import { uncommittedPeriods } from './periodStatus.js'
 import { getRotation } from '../../storage/rotation.js'
 import { allBlockIds } from '../rotation/model.js'
@@ -501,6 +501,16 @@ export default function KitchenScorePanel({
   const kitchenCount = highestKitchen(section)
   const kitchenNumbers = Array.from({ length: kitchenCount }, (_, i) => i + 1)
   const unassigned = roster.filter(s => section.students[s.userId]?.kitchen == null)
+  // Students actually working in each kitchen (absent ones don't take a job
+  // row). A kitchen at MAX_PER_KITCHEN can't take a moved-in student; one over
+  // it (an absentee came back after a move) is flagged. DECISIONS.md, 2026-11-14.
+  const presentByKitchen = {}
+  for (const s of roster) {
+    const st = section.students[s.userId]
+    if (st?.present !== false && st?.kitchen != null) presentByKitchen[st.kitchen] = (presentByKitchen[st.kitchen] ?? 0) + 1
+  }
+  // A primitive, so memoized rows only re-render when the set of full kitchens changes.
+  const fullKey = Object.entries(presentByKitchen).filter(([, n]) => n >= MAX_PER_KITCHEN).map(([k]) => k).sort().join(',')
 
   return (
     <div className="space-y-6">
@@ -628,7 +638,14 @@ export default function KitchenScorePanel({
               <Card key={k} padding="none" className="overflow-hidden border-2 border-[var(--color-border-strong)]">
                 {/* Bauhaus: a bold numbered header block. */}
                 <div className="flex items-center justify-between gap-3 px-4 py-2 bg-[var(--color-bg-hover)] border-b-2 border-[var(--color-border-strong)]">
-                  <h3 className="text-sm font-bold text-[var(--color-text-body)]">Kitchen {k}</h3>
+                  <h3 className="text-sm font-bold text-[var(--color-text-body)]">
+                    Kitchen {k}
+                    {(presentByKitchen[k] ?? 0) > MAX_PER_KITCHEN && (
+                      <span className="ml-2 text-xs font-semibold text-[var(--color-error)]">
+                        {presentByKitchen[k]} working: over the limit of {MAX_PER_KITCHEN}
+                      </span>
+                    )}
+                  </h3>
                   <Chip tone="exceeded" active={exceeded} onClick={() => applySection(s => setKitchenExceeded(s, k, !exceeded))}>
                     Exceeded (4)
                   </Chip>
@@ -661,6 +678,7 @@ export default function KitchenScorePanel({
                     )}
                     {members.map(s => (
                       <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]} canvas={profState[s.userId]}
+                        fullKey={fullKey} homeKitchen={standing?.students?.[s.userId] ?? null}
                         kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore} teacherUserId={teacherUserId}
                         flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                     ))}
@@ -679,6 +697,7 @@ export default function KitchenScorePanel({
               <div className="px-4 py-2 divide-y divide-[var(--color-border-subtle)]">
                 {unassigned.map(s => (
                   <StudentRow key={s.userId} student={s} section={section} score={scores[s.userId]} canvas={profState[s.userId]}
+                    fullKey={fullKey} homeKitchen={standing?.students?.[s.userId] ?? null}
                     kitchenCount={kitchenCount} commentLibrary={commentLibrary} maxScore={maxScore}
                     flagsById={byId} individualFlags={individualFlagOptions} onApply={applySection} onAssignKitchen={assignKitchen} />
                 ))}
@@ -781,10 +800,14 @@ function canvasMismatch(st, score, canvas) {
   return matches ? null : (canvas.excused ? 'Excused' : String(canvas.score))
 }
 
-function StudentRowBase({ student, section, score, canvas, kitchenCount, commentLibrary = [], maxScore = 4, teacherUserId = null, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
+function StudentRowBase({ student, section, score, canvas, fullKey = '', homeKitchen = null, kitchenCount, commentLibrary = [], maxScore = 4, teacherUserId = null, flagsById = FLAG_BY_ID, individualFlags = [], onApply, onAssignKitchen }) {
   const st = section.students[student.userId] ?? { kitchen: null, flagIds: [], present: true, excused: false }
   const absent = st.present === false
   const mismatch = canvasMismatch(st, score, canvas)
+  // Moved out of their home kitchen (Course Settings) for this lab: shown as
+  // Visiting here and on the Kitchen Rotation board.
+  const visiting = !absent && homeKitchen != null && st.kitchen != null && st.kitchen !== homeKitchen
+  const full = new Set(fullKey ? fullKey.split(',').map(Number) : [])
 
   // Adopt Canvas's current value as this student's score, instead of deriving one
   // from flags — see acceptCanvasScore/pickTeacherComment in storage/labGrading.js
@@ -833,7 +856,10 @@ function StudentRowBase({ student, section, score, canvas, kitchenCount, comment
         >
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
-        <span className="shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate max-w-[8rem] md:max-w-none md:w-36" title={student.userName}>{student.userName}</span>
+        <span className="shrink-0 text-sm font-medium text-[var(--color-text-body)] truncate max-w-[8rem] md:max-w-none md:w-36" title={visiting ? `${student.userName}: visiting from Kitchen ${homeKitchen} for this lab` : student.userName}>
+          {student.userName}
+          {visiting && <span className="block text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--color-bauhaus-blue)]">Visiting</span>}
+        </span>
         <span className={`inline-flex items-center justify-center w-10 h-7 shrink-0 rounded-[var(--radius-control)] text-sm font-bold border-2 border-[var(--color-border-strong)] ${
           absent ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-body)]'
         }`}>{absent ? '0' : score}</span>
@@ -880,7 +906,10 @@ function StudentRowBase({ student, section, score, canvas, kitchenCount, comment
             className={`${st.kitchen == null ? 'w-36' : 'w-24'} shrink-0`}
             options={[
               { value: '', label: 'No kitchen' },
-              ...Array.from({ length: kitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
+              ...Array.from({ length: kitchenCount }, (_, i) => {
+                const isFull = !absent && full.has(i + 1) && st.kitchen !== i + 1
+                return { value: String(i + 1), label: `K${i + 1}${isFull ? ' (full)' : ''}`, disabled: isFull }
+              }),
             ]}
           />
           {/* Flags don't apply to an absent student, but the button keeps its
@@ -974,6 +1003,8 @@ function StudentRowBase({ student, section, score, canvas, kitchenCount, comment
 function studentRowEqual(prev, next) {
   return prev.score === next.score
     && prev.canvas === next.canvas
+    && prev.fullKey === next.fullKey
+    && prev.homeKitchen === next.homeKitchen
     && prev.kitchenCount === next.kitchenCount
     && prev.maxScore === next.maxScore
     && prev.teacherUserId === next.teacherUserId

@@ -14,6 +14,10 @@
 import { kvGet, kvSet } from './kv.js'
 import { getLabGrading } from './labGrading.js'
 
+// Most students one kitchen holds: its five job rows on the Kitchen Rotation
+// board (pages/rotation/model.js's MAX_KITCHEN). DECISIONS.md, 2026-11-14.
+export const MAX_PER_KITCHEN = 5
+
 const courseKey = courseId => `kitchens/${courseId}`
 
 export async function getStandingKitchens(courseId, sectionId) {

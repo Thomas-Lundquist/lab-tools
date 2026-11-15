@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Droplet, X } from 'lucide-react'
-import { MAX_KITCHEN, activeKitchenIdxs, staffedKitchenIdxs, seatOrder, isAbsent, blockLabel } from './model.js'
+import { MAX_KITCHEN, blockLabel, dayView } from './model.js'
 
 // The classroom display, ported from ../kitchen-rotator/js/fullscreen.js:
 // names sized to fill the screen, today's duties, and countdowns to the
@@ -57,8 +57,12 @@ function fitAll(root) {
   fitRole(q('[data-fs=sink]'), 36, 10)
 }
 
-export default function FullscreenBoard({ state, blockId, names, display, onClose }) {
+// Shows only who's working today (model.js's dayView): absent students are
+// left off entirely (their jobs read SPLIT), and a student moved in for today's
+// lab is marked Visiting. Kitchens with nobody working today aren't shown.
+export default function FullscreenBoard({ state, blockId, names, display, view: viewProp, onClose }) {
   const block = state.blocks[blockId]
+  const view = viewProp ?? (block ? dayView(block) : null)
   const [scheduleKey, setScheduleKey] = useState(() => (new Date().getDay() === 5 ? 'friday' : 'monThu'))
   const [now, setNow] = useState(() => new Date())
   const gridRef = useRef(null)
@@ -72,7 +76,7 @@ export default function FullscreenBoard({ state, blockId, names, display, onClos
 
   // Fit after every content change, again once layout settles, on resize, and
   // once web fonts arrive (measuring against fallback metrics gives the wrong size).
-  const contentKey = JSON.stringify([block?.kitchens, block?.absent, names, display, state.jobTitles])
+  const contentKey = JSON.stringify([view?.kitchens.map(k => [k.working, [...k.visitors]]), names, display, state.jobTitles])
   useLayoutEffect(() => {
     const el = gridRef.current
     if (!el) return
@@ -85,13 +89,15 @@ export default function FullscreenBoard({ state, blockId, names, display, onClos
   }, [contentKey])
 
   if (!block) return null
-  const active = activeKitchenIdxs(block)
-  const staffed = staffedKitchenIdxs(block)
-  const orders = Object.fromEntries(active.map(ki => [ki, seatOrder(block, ki)]))
+  const active = view.kitchens.flatMap((k, i) => (k.working.length ? [i] : []))
+  const staffed = active
+  const orders = Object.fromEntries(active.map(ki => [ki, view.kitchens[ki].working]))
+  // Normally 5 rows; more only while a kitchen is over the limit (flagged).
+  const totalRows = Math.max(MAX_KITCHEN, ...active.map(ki => orders[ki].length))
   let usedRows = 0
-  for (let r = 0; r < MAX_KITCHEN; r++) if (active.some(ki => orders[ki][r])) usedRows = r + 1
+  for (let r = 0; r < totalRows; r++) if (active.some(ki => orders[ki][r])) usedRows = r + 1
   usedRows = Math.max(1, usedRows)
-  const splitRows = MAX_KITCHEN - usedRows
+  const splitRows = totalRows - usedRows
   // fr rows (min 0) always sum to exactly the grid's height. Unfilled job rows
   // still show (they read SPLIT) but at half height; the duty row gets the
   // room the header and name rows give up.
@@ -152,25 +158,29 @@ export default function FullscreenBoard({ state, blockId, names, display, onClos
       ) : (
         <div ref={gridRef} className="flex-1 min-h-0 grid bg-[var(--color-bg-surface)]" style={gridStyle}>
           <div className={cell} />
-          {active.map(ki => <div key={ki} data-fs="head" className={`${cell} whitespace-nowrap font-black`}>K{ki + 1}</div>)}
+          {active.map(ki => {
+            const over = orders[ki].length > MAX_KITCHEN
+            return (
+              <div key={ki} data-fs="head" className={`${cell} whitespace-nowrap font-black ${over ? 'bg-[var(--color-danger-fill)] text-[var(--color-error)]' : ''}`}>
+                K{ki + 1}{over && ` · ${orders[ki].length}`}
+              </div>
+            )
+          })}
 
-          {Array.from({ length: MAX_KITCHEN }, (_, r) => {
+          {Array.from({ length: totalRows }, (_, r) => {
             const splitRow = r >= usedRows
             return [
-              <div key={`l${r}`} data-fs={splitRow ? 'splitlabel' : 'label'} className={`${cell} font-semibold text-[var(--color-text-secondary)] ${splitRow ? 'opacity-70' : ''}`}>{state.jobTitles[r]}</div>,
+              <div key={`l${r}`} data-fs={splitRow ? 'splitlabel' : 'label'} className={`${cell} font-semibold text-[var(--color-text-secondary)] ${splitRow ? 'opacity-70' : ''}`}>{state.jobTitles[r] ?? ''}</div>,
               ...active.map(ki => {
                 const uid = orders[ki][r]
                 if (!uid) return <div key={`${r}-${ki}`} data-fs="split" className={`${cell} tracking-widest text-[var(--color-text-disabled)]`}>SPLIT</div>
-                const away = isAbsent(block, uid)
+                const visiting = view.kitchens[ki].visitors.has(uid)
                 return (
-                  <div key={`${r}-${ki}`} data-fs="name" className={`${cell} whitespace-nowrap relative font-bold ${away ? 'text-[var(--color-text-disabled)]' : ''}`}>
+                  <div key={`${r}-${ki}`} data-fs="name" className={`${cell} whitespace-nowrap relative font-bold ${visiting ? 'shadow-[inset_0_0_0_4px_var(--color-bauhaus-blue)]' : ''}`}>
                     {names[uid] ?? '…'}
-                    {away && (
-                      // A veil ON TOP of the name, so an absence costs no grid height.
-                      <span className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--color-danger-fill)] opacity-90 pointer-events-none">
-                        <b className="text-[var(--color-error)] text-lg tracking-widest">ABSENT</b>
-                        <i className="text-[var(--color-text-secondary)] text-sm not-italic tracking-widest">SPLIT</i>
-                      </span>
+                    {visiting && (
+                      // A tag ON TOP of the cell's corner, so a visit costs no grid height.
+                      <span className="absolute top-1 right-2 text-xs font-bold uppercase tracking-widest text-[var(--color-bauhaus-blue)] pointer-events-none">Visiting</span>
                     )}
                   </div>
                 )

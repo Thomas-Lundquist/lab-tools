@@ -230,3 +230,107 @@ test('a damaged or merged state loads: missing blocks become prep, no student si
   assert.equal(blockLabel(n, 'A1'), 'A1')
   assert.deepEqual(normalizeState(null, TODAY), freshState())
 })
+
+// --- linked to Labs: home kitchens, today's lab, visitors (DECISIONS.md, 2026-11-14) ---
+
+import { dayView, overLimitIdxs } from './model.js'
+import { reconcileSeating } from './roster.js'
+import { pickTodaysLab, labAttendance } from './today.js'
+import { buildRotationRecord } from './history.js'
+
+const att = (absent = [], kitchen = {}) => ({ absent: new Set(absent), kitchen, labName: 'Lab 4' })
+
+test('dayView: absent students leave the job rows and keep their rotation place', () => {
+  const s = setup({ A1: [['a', 'b', 'c', 'd']] })
+  const v = dayView(s.blocks.A1, att(['b']))
+  assert.deepEqual(v.kitchens[0].working, ['a', 'c', 'd'])
+  assert.deepEqual(students(s, 'A1'), ['a', 'b', 'c', 'd'], 'stored order untouched')
+  assert.equal(v.source, 'lab')
+})
+
+test('dayView: a student moved in the Lab tab works in the new kitchen as a visitor, after its crew', () => {
+  const s = setup({ A1: [['a', 'b'], ['c', 'd']] })
+  const v = dayView(s.blocks.A1, att([], { a: 1, b: 0, c: 1 }))
+  assert.deepEqual(v.kitchens[0].working, ['b'])
+  assert.deepEqual(v.kitchens[1].working, ['c', 'd', 'a'])
+  assert.deepEqual([...v.kitchens[1].visitors], ['a'])
+})
+
+test('dayView: your scenario — full kitchen, two out, two visitors in, stays at four working', () => {
+  const s = setup({ A1: [['a', 'b', 'c', 'd'], ['e', 'f']] })
+  const v = dayView(s.blocks.A1, att(['c', 'd'], { e: 0, f: 0 }))
+  assert.deepEqual(v.kitchens[0].working, ['a', 'b', 'e', 'f'])
+  assert.deepEqual(overLimitIdxs(v), [])
+  // ...and both absentees coming back pushes it to six, which is flagged, not blocked.
+  const back = dayView(s.blocks.A1, att([], { e: 0, f: 0 }))
+  assert.deepEqual(overLimitIdxs(back), [0])
+})
+
+test('dayView with no lab uses the rotator’s own marks', () => {
+  const s = setup({ A1: [['a', 'b']] })
+  setAbsent(s.blocks.A1, 'a', true, TODAY)
+  const v = dayView(s.blocks.A1, null)
+  assert.deepEqual(v.kitchens[0].working, ['b'])
+  assert.equal(v.source, 'rotator')
+  assert.deepEqual(staffedKitchenIdxs(s.blocks.A1), [0])
+})
+
+test('a kitchen staffed only by visitors gets a duty and counts as staffed', () => {
+  const s = setup({ A1: [['a', 'b'], ['c']] }, ['Sweep', 'Mop'])
+  const views = { A1: dayView(s.blocks.A1, att(['c'], { a: 2 })) }
+  assert.deepEqual(staffedKitchenIdxs(s.blocks.A1, views.A1), [0, 2])
+  const d = blockDisplay(s, 'A1', views).duties
+  assert.ok(d[2], 'K3 has a duty')
+  assert.equal(d[1], undefined, 'K2, all out, has none')
+})
+
+test('records list visitors under the kitchen they worked in, and absentees as Absent', () => {
+  const s = setup({ A1: [['a', 'b'], ['c', 'd']] })
+  const views = { A1: dayView(s.blocks.A1, att(['b'], { c: 0 })) }
+  const rec = buildRotationRecord(s, 'A1', { batchId: 'x', today: TODAY, views })
+  const k1 = rec.k.find(k => k.i === 0)
+  assert.deepEqual(k1.s, ['a', 'c', 'b'])
+  assert.deepEqual(k1.ab, ['b'])
+  assert.deepEqual(k1.v, ['c'])
+  const rows = participationRows([{ label: 'A1', day: 'A', records: [rec] }], id => id.toUpperCase())
+  assert.deepEqual(rows.filter(r => r[4] === 'K1').map(r => [r[6], r[7]]), [['A', 'Present'], ['C', 'Visiting'], ['B', 'Absent']])
+})
+
+test('reconcileSeating follows Course Settings, keeping each kitchen’s rotation order', () => {
+  const s = setup({ A1: [['a', 'b', 'c'], ['d']] })
+  const changed = reconcileSeating(s.blocks.A1, { a: 1, c: 1, b: 2, d: 2, e: 1 }, ['a', 'b', 'c', 'd', 'e'])
+  assert.equal(changed, true)
+  assert.deepEqual(students(s, 'A1', 0), ['a', 'c', 'e'], 'kept order, newcomer at the bottom')
+  assert.deepEqual(students(s, 'A1', 1), ['d', 'b'])
+  assert.equal(reconcileSeating(s.blocks.A1, { a: 1, c: 1, b: 2, d: 2, e: 1 }, ['a', 'b', 'c', 'd', 'e']), false, 'idempotent')
+})
+
+test('reconcileSeating ignores students not in the section and leaves a period with no home kitchens alone', () => {
+  const s = setup({ A1: [['a', 'b']] })
+  assert.equal(reconcileSeating(s.blocks.A1, { a: 1, gone: 1 }, ['a', 'b']), true)
+  assert.deepEqual(students(s, 'A1'), ['a'], 'b has no home kitchen, so leaves; gone is not in the section')
+  const t = setup({ A1: [['a', 'b']] })
+  assert.equal(reconcileSeating(t.blocks.A1, null, ['a', 'b']), false)
+  assert.equal(reconcileSeating(t.blocks.A1, {}, ['a', 'b']), false)
+  assert.deepEqual(students(t, 'A1'), ['a', 'b'])
+})
+
+test('pickTodaysLab picks the lab dated today for this period, the most recently graded if two', () => {
+  const labs = [
+    { id: 'l1', dates: { s1: TODAY } },
+    { id: 'l2', dates: { s1: '2026-11-03', s2: TODAY } },
+    { id: 'l3', dates: { s1: TODAY } },
+  ]
+  assert.equal(pickTodaysLab(labs, 's2', TODAY).id, 'l2')
+  assert.equal(pickTodaysLab(labs, 's3', TODAY), null)
+  const grading = { l1: { draft: {}, updatedAt: '2026-11-04T15:00' }, l3: { committed: {}, committedAt: '2026-11-04T09:00' } }
+  assert.equal(pickTodaysLab(labs, 's1', TODAY, grading).id, 'l1')
+})
+
+test('labAttendance reads absences, and moves only when the period has home kitchens', () => {
+  const section = { students: { a: { present: false, excused: true }, b: { present: true, kitchen: 3 }, c: { kitchen: 1 } } }
+  const withHome = labAttendance(section, 'Lab 4', true)
+  assert.deepEqual([...withHome.absent], ['a'])
+  assert.deepEqual(withHome.kitchen, { b: 2, c: 0 })
+  assert.deepEqual(labAttendance(section, 'Lab 4', false).kitchen, {})
+})

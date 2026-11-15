@@ -17,7 +17,7 @@ import {
   saveSectionDayType, saveSectionExclusions, saveCourseSettings,
   getLabs, deleteLabsForCourse, resetCourseSetup, getCourseSetup, getTemplates,
 } from '../../storage/setup.js'
-import { getAllStandingKitchens, saveStandingKitchen } from '../../storage/kitchens.js'
+import { getAllStandingKitchens, saveStandingKitchen, MAX_PER_KITCHEN } from '../../storage/kitchens.js'
 import { findDuplicateEnrollments } from './duplicateEnrollments.js'
 
 // Always offer at least this many; a period that already placed someone in a
@@ -307,6 +307,13 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                 const standingStudents = standing[sec.id]?.students ?? {}
                 const sectionKitchenCount = Math.max(KITCHEN_COUNT, ...Object.values(standingStudents))
                 const editingKitchens = kitchenSection === sec.id
+                // A kitchen holds at most MAX_PER_KITCHEN: the rotator's job
+                // rows (DECISIONS.md, 2026-11-14). A full one can't take more.
+                const homeCounts = {}
+                for (const id of pickableIds) {
+                  const k = standingStudents[id]
+                  if (k != null) homeCounts[k] = (homeCounts[k] ?? 0) + 1
+                }
                 return (
                   <div key={sec.id} className="py-2 space-y-2">
                     <div className="flex items-center justify-between">
@@ -340,7 +347,10 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                                 onChange={v => handleSetStandingKitchen(sec.id, id, v)}
                                 options={[
                                   { value: '', label: 'No kitchen' },
-                                  ...Array.from({ length: sectionKitchenCount }, (_, i) => ({ value: String(i + 1), label: `K${i + 1}` })),
+                                  ...Array.from({ length: sectionKitchenCount }, (_, i) => {
+                                    const full = (homeCounts[i + 1] ?? 0) >= MAX_PER_KITCHEN && standingStudents[id] !== i + 1
+                                    return { value: String(i + 1), label: `K${i + 1}${full ? ' (full)' : ''}`, disabled: full }
+                                  }),
                                 ]}
                               />
                             </div>

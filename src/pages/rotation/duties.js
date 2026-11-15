@@ -24,7 +24,7 @@ function dayBlockOrder(state, day, ensureId) {
 // repairs what arithmetic alone can't (blocks whose pools differ).
 //
 // Returns { blockId: { kitchenIdx: duty } }.
-export function assignDayDuties(state, day, ensureId) {
+export function assignDayDuties(state, day, ensureId, views = {}) {
   const usedByKitchen = new Map()
   const byBlock = {}
 
@@ -38,7 +38,7 @@ export function assignDayDuties(state, day, ensureId) {
     const takenHere = new Set()
 
     // Staffed, not active: a kitchen whose whole crew is out draws no duty.
-    staffedKitchenIdxs(block).forEach((ki, seat) => {
+    staffedKitchenIdxs(block, views[id]).forEach((ki, seat) => {
       if (pool.length === 0) { out[ki] = ''; return }
       const used = usedByKitchen.get(ki) || []
       // Counted by SEAT (position among staffed kitchens), not kitchen number,
@@ -75,8 +75,8 @@ export function assignDayDuties(state, day, ensureId) {
 // every period, so washing again the same day isn't redundant.
 //
 // Returns { kitchenIdx: true } for kitchens on the sink.
-export function centerSinks(block) {
-  const staffedIdxs = staffedKitchenIdxs(block)
+export function centerSinks(block, view) {
+  const staffedIdxs = staffedKitchenIdxs(block, view)
   const staffed = new Set(staffedIdxs)
   const wantOdd = block.centerSink === 0
   const out = {}
@@ -87,13 +87,14 @@ export function centerSinks(block) {
 }
 
 // What a block's board shows right now: { duties: {ki: text}, sinks: {ki: true} }.
-// Read-only; the rotation cursors move only in advanceBlock.
-export function blockDisplay(state, blockId) {
+// Read-only; the rotation cursors move only in advanceBlock. `views` holds each
+// class's dayView (model.js); a class missing from it uses its own marks.
+export function blockDisplay(state, blockId, views = {}) {
   const block = state.blocks[blockId]
   if (!block) return { duties: {}, sinks: {} }
   return {
-    duties: assignDayDuties(state, block.day, blockId)[blockId] ?? {},
-    sinks: centerSinks(block),
+    duties: assignDayDuties(state, block.day, blockId, views)[blockId] ?? {},
+    sinks: centerSinks(block, views[blockId]),
   }
 }
 

@@ -3,7 +3,7 @@ import { Droplet, EllipsisVertical, Maximize2, Shuffle } from 'lucide-react'
 import Card from '../../components/Card.jsx'
 import Button from '../../components/Button.jsx'
 import Select from '../../components/Select.jsx'
-import { MAX_KITCHEN, NUM_KITCHENS, activeKitchenIdxs, seatOrder, isAbsent } from './model.js'
+import { MAX_KITCHEN, NUM_KITCHENS, activeKitchenIdxs, dayView } from './model.js'
 import { unseatedIds } from './roster.js'
 
 const ACCENT = { 1: 'var(--color-bauhaus-red)', 2: 'var(--color-bauhaus-blue)' }
@@ -11,15 +11,30 @@ const GRID = { gridTemplateColumns: `minmax(6.5rem, auto) repeat(${NUM_KITCHENS}
 
 // One class on the board: its header, the 8-kitchen seat grid, today's duties
 // and center sink, and any students in the section who aren't seated yet.
-export default function BlockCard({ state, blockId, roster, display, actions }) {
+//
+// `view` is today's dayView (model.js). On a lab day (`link.att`) absences come
+// from the Lab tab, so absent students simply leave the job rows here. With no
+// lab, this board takes attendance itself, so absent students stay visible
+// (struck through, at the bottom) to be tapped back in. `link.home` means the
+// seating comes from Course Settings, so moving students between kitchens
+// isn't offered here.
+export default function BlockCard({ state, blockId, roster, display, actions, view: viewProp, link = null }) {
   const block = state.blocks[blockId]
+  const view = viewProp ?? dayView(block)
   const day = block.day
   const pos = state.slots[day].indexOf(blockId)
-  const active = activeKitchenIdxs(block)
+  const labDay = !!link?.att
+  const homeFromSettings = !!link?.home
+  const stored = activeKitchenIdxs(block)
+  const active = [...new Set([...stored, ...view.kitchens.flatMap((k, i) => (k.working.length ? [i] : []))])].sort((a, b) => a - b)
   const ready = roster.status === 'ready'
   const unseated = ready ? unseatedIds(block, roster.sectionIds) : []
   const nameOf = uid => roster.names[uid] ?? (roster.status === 'loading' ? '…' : 'Unknown student')
   const nobodySeated = active.length === 0
+  // Rows top to bottom: today's workers, then (no-lab days only) the absent.
+  const rowsFor = ki => (labDay ? view.kitchens[ki].working
+    : [...view.kitchens[ki].working, ...block.kitchens[ki].students.filter(uid => view.absent.has(uid))])
+  const rowCount = Math.max(MAX_KITCHEN, ...active.map(ki => rowsFor(ki).length))
 
   return (
     <Card padding="none" className="overflow-hidden">
@@ -46,23 +61,27 @@ export default function BlockCard({ state, blockId, roster, display, actions }) 
           {roster.sectionName ?? ''}
           {roster.status === 'error' && <span className="text-[var(--color-error)]"> · Couldn’t load the roster: {roster.error}</span>}
         </span>
+        <span className="text-xs text-[var(--color-text-secondary)] truncate">
+          {labDay ? <>· Attendance from <b>{link.lab?.name}</b> (Lab tab)</> : '· No lab today: take attendance here'}
+          {!homeFromSettings && block.sectionId && ' · No home kitchens in Course Settings, using this seating'}
+        </span>
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={() => actions.advance(blockId)} disabled={nobodySeated}>Advance</Button>
           <Button size="sm" variant="secondary" icon={Maximize2} onClick={() => actions.fullscreen(blockId)} disabled={nobodySeated}>Full screen</Button>
           <BlockMenu
             items={[
-              { label: 'Attendance…', onClick: () => actions.attendance(blockId), disabled: nobodySeated },
+              { label: labDay ? 'Attendance (from the Lab tab)' : 'Attendance…', onClick: () => actions.attendance(blockId), disabled: nobodySeated || labDay },
               { label: 'Rotation history', onClick: () => actions.history(blockId) },
               { label: 'Save as original', onClick: () => actions.saveOriginal(blockId), disabled: nobodySeated },
               { label: 'Restore to original', onClick: () => actions.restoreOriginal(blockId), disabled: !block.kitchens.some(k => k.original.length) },
-              { label: 'Reshuffle into kitchens…', onClick: () => actions.shuffle(blockId), disabled: !ready },
+              { label: homeFromSettings ? 'Reshuffle (home kitchens are set in Course Settings)' : 'Reshuffle into kitchens…', onClick: () => actions.shuffle(blockId), disabled: !ready || homeFromSettings },
               { label: 'Remove this class…', onClick: () => actions.remove(blockId), danger: true },
             ]}
           />
         </div>
       </div>
 
-      {nobodySeated && ready && roster.sectionIds.length > 0 ? (
+      {nobodySeated && ready && roster.sectionIds.length > 0 && !homeFromSettings ? (
         <div className="px-4 py-6 flex flex-col items-center gap-3 text-center">
           <p className="text-sm text-[var(--color-text-secondary)]">
             {roster.sectionIds.length} students in {roster.sectionName}. None seated yet.
@@ -77,29 +96,36 @@ export default function BlockCard({ state, blockId, roster, display, actions }) 
         <div className="overflow-x-auto">
           <div className="grid text-sm min-w-max" style={GRID}>
             <div className="px-2 py-1.5" />
-            {Array.from({ length: NUM_KITCHENS }, (_, ki) => (
-              <div key={ki} className={`px-2 py-1.5 text-center font-semibold border-l border-[var(--color-border-subtle)] ${active.includes(ki) ? 'text-[var(--color-text-body)]' : 'text-[var(--color-text-disabled)]'}`}>
-                K{ki + 1}
-              </div>
-            ))}
+            {Array.from({ length: NUM_KITCHENS }, (_, ki) => {
+              const n = view.kitchens[ki].working.length
+              const over = n > MAX_KITCHEN
+              return (
+                <div key={ki} className={`px-2 py-1.5 text-center font-semibold border-l border-[var(--color-border-subtle)] ${over ? 'text-[var(--color-error)] bg-[var(--color-danger-fill)]' : active.includes(ki) ? 'text-[var(--color-text-body)]' : 'text-[var(--color-text-disabled)]'}`}
+                  title={over ? `${n} working: over the limit of ${MAX_KITCHEN}. Move someone in the Lab tab.` : undefined}>
+                  K{ki + 1}{over && ` · ${n} working`}
+                </div>
+              )
+            })}
 
-            {Array.from({ length: MAX_KITCHEN }, (_, r) => (
-              <Row key={r} label={state.jobTitles[r]}>
+            {Array.from({ length: rowCount }, (_, r) => (
+              <Row key={r} label={state.jobTitles[r] ?? ''}>
                 {Array.from({ length: NUM_KITCHENS }, (_, ki) => {
                   if (!active.includes(ki)) {
                     return <Cell key={ki} empty />
                   }
-                  const uid = seatOrder(block, ki)[r]
+                  const uid = rowsFor(ki)[r]
                   if (!uid) return <Cell key={ki}><span className="text-xs tracking-wide text-[var(--color-text-disabled)]">SPLIT</span></Cell>
-                  const away = isAbsent(block, uid)
+                  const away = view.absent.has(uid)
+                  const visiting = view.kitchens[ki].visitors.has(uid)
                   return (
                     <Cell key={ki}>
                       <button
                         onClick={() => actions.student(blockId, uid)}
-                        title={away ? 'Out today — this job is shared by the kitchen' : 'Attendance, move, or unseat'}
-                        className={`w-full text-left px-1.5 py-1 rounded-[var(--radius-control)] truncate hover:bg-[var(--color-bg-hover)] ${away ? 'line-through text-[var(--color-text-body)] bg-[var(--color-danger-fill)]' : 'text-[var(--color-text-body)]'}`}
+                        title={away ? 'Out today — this job is shared by the kitchen' : visiting ? 'Visiting for today’s lab (moved in the Lab tab)' : 'Student options'}
+                        className={`w-full text-left px-1.5 py-1 rounded-[var(--radius-control)] truncate hover:bg-[var(--color-bg-hover)] text-[var(--color-text-body)] ${away ? 'line-through bg-[var(--color-danger-fill)]' : visiting ? 'shadow-[inset_0_0_0_2px_var(--color-bauhaus-blue)]' : ''}`}
                       >
                         {nameOf(uid)}
+                        {visiting && <span className="block text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--color-bauhaus-blue)]">Visiting</span>}
                       </button>
                     </Cell>
                   )
@@ -132,10 +158,16 @@ export default function BlockCard({ state, blockId, roster, display, actions }) 
       {unseated.length > 0 && !nobodySeated && (
         <div className="px-4 py-3 border-t border-[var(--color-border)] bg-[var(--color-warning-fill)]">
           <p className="text-xs font-semibold text-[var(--color-text-body)] mb-2">
-            Not seated yet ({unseated.length}): new to {roster.sectionName}, or unseated. Tap to pick a kitchen.
+            {homeFromSettings
+              ? `No home kitchen yet (${unseated.length}): give them one in Course Settings.`
+              : `Not seated yet (${unseated.length}): new to ${roster.sectionName}, or unseated. Tap to pick a kitchen.`}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {unseated.map(uid => (
+            {unseated.map(uid => homeFromSettings ? (
+              <span key={uid} className="text-xs px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-surface)] text-[var(--color-text-body)]">
+                {nameOf(uid)}
+              </span>
+            ) : (
               <button key={uid} onClick={() => actions.student(blockId, uid)}
                 className="text-xs px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-[var(--color-text-body)] hover:bg-[var(--color-bg-hover)]">
                 {nameOf(uid)}

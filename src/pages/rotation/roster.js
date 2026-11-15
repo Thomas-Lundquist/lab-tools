@@ -118,6 +118,33 @@ export function removeDeparted(block, sectionIds) {
   return gone
 }
 
+// Seats a class from its period's home kitchens in Course Settings
+// (storage/kitchens.js, `{ userId: kitchenNo }`, 1-based) — the one place a
+// home kitchen is changed (DECISIONS.md, 2026-11-14). Each kitchen keeps its
+// current members in their rotation order; a student whose home moved here
+// joins at the bottom (sorted by id, so two devices agree on the order), and
+// anyone whose home isn't here leaves it. Only students still in the section
+// are seated, so this never fights removeDeparted. Mutates; returns whether
+// anything changed. A period with no home kitchens set (empty `home`) is left
+// alone: the rotator's own seating stands.
+export function reconcileSeating(block, home, sectionIds) {
+  const inSection = new Set(sectionIds)
+  if (!home || inSection.size === 0) return false
+  const want = {}
+  for (const [uid, k] of Object.entries(home)) {
+    if (inSection.has(uid) && Number.isInteger(k) && k >= 1 && k <= NUM_KITCHENS) want[uid] = k - 1
+  }
+  if (Object.keys(want).length === 0) return false
+  let changed = false
+  block.kitchens.forEach((k, ki) => {
+    const keep = k.students.filter(uid => want[uid] === ki)
+    const join = Object.keys(want).filter(uid => want[uid] === ki && !keep.includes(uid)).sort()
+    const next = [...keep, ...join].slice(0, MAX_KITCHEN)
+    if (next.join() !== k.students.join()) { k.students = next; changed = true }
+  })
+  return changed
+}
+
 export function unseatedIds(block, sectionIds) {
   const seated = new Set(seatedIds(block))
   return sectionIds.filter(id => !seated.has(id))
