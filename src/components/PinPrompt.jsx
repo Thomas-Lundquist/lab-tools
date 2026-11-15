@@ -161,7 +161,7 @@ export default function PinPrompt({ onVerified, onCancel, warning }) {
         </div>
 
         <button onClick={() => setView('reset')} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline block mx-auto">
-          Forgot your PIN? Reset Extension
+          Forgot your PIN? Reset this device
         </button>
       </div>
     </Overlay>

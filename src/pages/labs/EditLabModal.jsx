@@ -44,7 +44,7 @@ export default function EditLabModal({ entry, assignment, assignments, modules, 
     .sort((a, b) => (b.published - a.published) || a.name.localeCompare(b.name, undefined, { numeric: true }))
 
   const scopeOptions = scope === 'custom'
-    ? [{ value: 'custom', label: 'Custom (mixed) — pick one to normalize' }, ...SCOPE_OPTIONS]
+    ? [{ value: 'custom', label: 'Mixed: choose one to apply to every period' }, ...SCOPE_OPTIONS]
     : SCOPE_OPTIONS
 
   async function handleSave() {
@@ -166,7 +166,7 @@ export default function EditLabModal({ entry, assignment, assignments, modules, 
           <Select id="edit-scope" value={scope} onChange={setScope} options={scopeOptions} />
           {scope === 'custom' && (
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              This assignment's periods don't all share one day type. Pick All periods, A-day, or B-day to normalize it.
+              This assignment’s periods are on a mix of A and B days. Choose All periods, A day, or B day to put them on one schedule.
             </p>
           )}
         </div>

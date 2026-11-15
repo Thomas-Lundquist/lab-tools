@@ -148,7 +148,7 @@ export default function FullscreenBoard({ state, blockId, names, display, view: 
           </div>
         )) : (
           <div className="flex-1 rounded-[var(--radius-card)] px-4 py-2 border border-[var(--color-border)] text-sm text-[var(--color-text-muted)]">
-            No bell time for position {pos + 1}. The schedule covers the four daily blocks.
+            No bell times for this period.
           </div>
         )}
       </div>

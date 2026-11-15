@@ -38,7 +38,7 @@ export function StudentModal({ block, uid, name, view = null, homeFromSettings =
       <div className="space-y-5">
         {(labName || homeFromSettings) && (
           <p className="text-xs text-[var(--color-text-muted)]">
-            {labName && <>Attendance{homeFromSettings ? ' and today’s kitchen' : ''} come from <b>{labName}</b> in the Lab tab. </>}
+            {labName && <>Attendance{homeFromSettings ? ' and today’s kitchen' : ''} come from <b>{labName}</b> on the Grade tab. </>}
             {homeFromSettings && 'Their home kitchen is set in Course Settings.'}
           </p>
         )}

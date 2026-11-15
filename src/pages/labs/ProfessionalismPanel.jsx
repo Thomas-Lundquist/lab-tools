@@ -348,7 +348,7 @@ function EntryRow({ entry, assignments, modules, courseId, sections, courseSetup
             <>
               {coveredSectionIds.size > 0 && (
                 <div className="space-y-1">
-                  <FieldLabel>Periods on this assignment</FieldLabel>
+                  <FieldLabel>Periods and Lab Dates</FieldLabel>
                   {sortedCovered.map(id => {
                     const sec = sections.find(s => s.id === id)
                     const saved = entry.dates?.[id] ?? ''
@@ -656,7 +656,7 @@ function RemoveLabModal({ entry, assignments, courseId, courseName, onClose, onR
           <input type="radio" name="remove-choice" checked={choice === 'unlink'} onChange={() => setChoice('unlink')} className="mt-1" />
           <span>
             <strong className="text-[var(--color-text-body)]">Remove from Lab Tools only.</strong>{' '}
-            Canvas keeps the assignment, its scores, and any journal zeros and locks. It leaves this list, the Lab tab, and Unit rollups.
+            Canvas keeps the assignment, its scores, and any journal zeros and locks. It leaves this list, the Grade tab, and Unit &amp; Term Scores.
             {!inCanvas && <span className="block text-xs text-[var(--color-text-muted)] mt-1">It’s already gone from Canvas.</span>}
           </span>
         </label>
@@ -1148,7 +1148,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-base font-semibold text-[var(--color-text-body)]">
-          Professionalism assignments{entries.length > 0 ? ` (${entries.length})` : ''}
+          Professionalism Assignments{entries.length > 0 ? ` (${entries.length})` : ''}
         </h2>
         <div className="flex gap-2">
           <Button size="sm" variant={formOpen === 'create' ? 'secondary' : 'primary'} icon={formOpen === 'create' && entries.length > 0 ? X : Plus}
@@ -1195,8 +1195,8 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
             className="max-w-sm"
           />
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            The exact title of the Canvas assignment (0–4 points) that holds the score. Must include
-            &ldquo;Professionalism&rdquo; so Unit &amp; Term Scores can find it.
+            The title of the Canvas assignment (0–4 points) that holds the score. It must include
+            &ldquo;Professionalism&rdquo; to count toward Unit &amp; Term Scores.
           </p>
         </div>
 
@@ -1216,7 +1216,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
               options={[{ value: '', label: 'No template' }, ...templates.map(t => ({ value: t.id, label: t.name }))]}
             />
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              Deployed into the new assignment's description. Defaults to this course's template (Course settings) — change it here just for this one.
+              Added to the new assignment’s description. Starts with this course’s default template; change it here for this assignment only.
             </p>
           </div>
         )}
@@ -1254,7 +1254,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">
               Professionalism opens and closes on the lab date. The Journal opens that day, is due
               {' '}{journalDueOffset} day{journalDueOffset === 1 ? '' : 's'} later, and closes
-              {' '}{journalCloseOffset} day{journalCloseOffset === 1 ? '' : 's'} after that. Change these offsets in Course Settings.
+              {' '}{journalCloseOffset} day{journalCloseOffset === 1 ? '' : 's'} after that. Change these in Course Settings.
             </p>
           )}
         </div>
@@ -1300,7 +1300,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
                 : <>{dupPrompt.matches.length} assignments titled &ldquo;{dupPrompt.ctx.expectedTitle}&rdquo; already exist in this course.</>}
             </p>
             <p><strong>Reuse existing</strong> grades the lab on the assignment already there — the usual choice when you meant the same lab.</p>
-            <p><strong>Create anyway</strong> makes a second copy with the same title. Unit &amp; Term Scores finds professionalism assignments by name, so both copies would count there.</p>
+            <p><strong>Create anyway</strong> makes a second copy with the same title. Both copies would count toward Unit &amp; Term Scores.</p>
           </div>
         </Modal>
       )}
@@ -1308,7 +1308,7 @@ export default function ProfessionalismPanel({ courseId, courseName, loadingCour
       {formOpen === 'link' && (
       <Card className="space-y-4">
         <div>
-          <h2 className="text-base font-semibold text-[var(--color-text-body)]">Link existing Professionalism assignments</h2>
+          <h2 className="text-base font-semibold text-[var(--color-text-body)]">Link Existing Professionalism Assignments</h2>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             Track professionalism assignments you already made in Canvas, so they count in Unit and Term scores.
             Each row starts with the Module it&rsquo;s in on Canvas; change it if needed. Tick several and use Link selected,

@@ -11,7 +11,7 @@ export default function ChangedInCanvas({ students, verb, onToggle, onToggleAll 
       <div className="flex items-start justify-between gap-3">
         <p className="flex items-start gap-1.5 text-sm font-medium text-[var(--color-text-body)]">
           <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
-          Changed in Canvas since Lab Tools last wrote {students.length === 1 ? 'it' : 'them'} ({students.length})
+          Changed in Canvas since your last commit ({students.length})
         </p>
         {onToggleAll && students.length > 1 && (
           <label className="flex items-center gap-1.5 text-xs shrink-0 text-[var(--color-text-secondary)]">
@@ -21,7 +21,7 @@ export default function ChangedInCanvas({ students, verb, onToggle, onToggleAll 
         )}
       </div>
       <p className="text-xs text-[var(--color-text-muted)]">
-        A makeup or a hand edit. Left as is unless you choose Overwrite{verb === 'revert' ? ', which puts back the score from before' : ''}.
+        Likely a makeup or a grade edited in Canvas. Left as is unless you choose Overwrite{verb === 'revert' ? ', which puts back the score from before' : ''}.
       </p>
       <ul className="max-h-60 overflow-y-auto divide-y divide-[var(--color-border-subtle)]">
         {students.map(s => (

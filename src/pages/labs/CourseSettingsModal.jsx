@@ -266,7 +266,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
       ) : (
         <div className="space-y-6">
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Possible duplicate enrollments</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Possible Duplicate Enrollments</h3>
             <p className="text-xs text-[var(--color-text-muted)]">
               Canvas has these students enrolled in more than one period. Check the period(s) where they should
               actually be graded — uncheck the rest.
@@ -297,7 +297,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Periods — A day / B day</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Periods: A Day / B Day</h3>
             <p className="text-xs text-[var(--color-text-muted)]">Sets which lab date (A day or B day) each period gets when you create a lab.</p>
             <div className="divide-y divide-[var(--color-border-subtle)]">
               {sections.map(sec => {
@@ -333,7 +333,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                     {editingKitchens ? (
                       <div className="rounded-[var(--radius-control)] bg-[var(--color-bg-hover)] p-3 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-[var(--color-text-body)]">Usual kitchen for each student</span>
+                          <span className="text-xs font-medium text-[var(--color-text-body)]">Home Kitchens</span>
                           <Button variant="ghost" size="sm" onClick={() => setKitchenSection(null)}>Close</Button>
                         </div>
                         <div className="space-y-1.5 max-h-72 overflow-y-auto">
@@ -342,7 +342,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                               <span className="text-sm text-[var(--color-text-body)] truncate">{studentNames[id] ?? id}</span>
                               <Select
                                 className="w-28 shrink-0"
-                                aria-label={`${studentNames[id] ?? id}'s usual kitchen`}
+                                aria-label={`${studentNames[id] ?? id}'s home kitchen`}
                                 value={standingStudents[id] != null ? String(standingStudents[id]) : ''}
                                 onChange={v => handleSetStandingKitchen(sec.id, id, v)}
                                 options={[
@@ -360,7 +360,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                       </div>
                     ) : (
                       <Button variant="ghost" size="sm" onClick={() => setKitchenSection(sec.id)}>
-                        Set usual kitchens…
+                        Set home kitchens…
                       </Button>
                     )}
                   </div>
@@ -369,10 +369,10 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
               {sections.length === 0 && <p className="text-sm text-[var(--color-text-muted)] py-2">No periods found.</p>}
             </div>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Unchecking a period above hides that student from its roster everywhere (Lab tab, Unit/Term rollup)
-              without touching their enrollment in Canvas. "Usual kitchens" sets where each student starts on a lab
-              that hasn't been graded yet — this is the only place that changes; moving someone during grading is
-              just for that lab, so they settle back into their usual kitchen next time.
+              Unchecking a period above hides that student from it in Lab Tools (the Grade tab and Unit &amp; Term
+              Scores) without changing their Canvas enrollment. Home kitchens set where each student works in every
+              lab and on the Kitchen Rotation board, up to 5 per kitchen. Moving a student on the Grade tab applies to
+              that lab only.
             </p>
           </div>
 
@@ -404,8 +404,8 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
                 options={[{ value: '', label: 'No template' }, ...templates.map(t => ({ value: t.id, label: t.name }))]}
               />
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Deployed into a new Professionalism assignment's description when it's created — the Create form
-                can still override this for one assignment. Manage templates in Settings › Professionalism templates.
+                Added to each new Professionalism assignment’s description. You can pick a different one when
+                creating an assignment. Manage templates in Settings › Professionalism Templates.
               </p>
             </div>
             <label className="flex items-center justify-between gap-3 text-sm">
@@ -447,7 +447,7 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
             </div>
 
             <p className="text-xs text-[var(--color-text-muted)]">
-              Lab flags (deductions) and the comment bank are shared by every course — edit them in Settings › Grading.
+              Lab flags and saved comments are shared by every course. Edit them in Settings › Grading.
             </p>
           </div>
 
@@ -457,11 +457,11 @@ export default function CourseSettingsModal({ courseId, courseName, setup, onSet
           </div>
 
           <div className="space-y-3 pt-4 border-t border-[var(--color-border)]">
-            <h3 className="text-sm font-semibold text-[var(--color-error)]">Danger zone</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-error)]">Danger Zone</h3>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Resets this course — Enabled, the Professionalism group, period A/B days, grading settings, and
-              Terms — back to a blank slate. Useful for testing setup from scratch. You'll separately choose whether
-              to keep existing pairings or also delete them (and their Canvas assignments) permanently.
+              Resets this course’s setup (Enabled, the Professionalism group, period A/B days, grading settings,
+              and Terms) to a blank slate. You’ll then choose whether to keep existing pairings or permanently
+              delete them along with their Canvas assignments.
             </p>
             <Button variant="danger" size="sm" onClick={() => { setClearChoice('keep'); setShowClearConfirm(true) }}>
               Clear Setup for This Course…

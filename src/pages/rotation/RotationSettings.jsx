@@ -11,7 +11,7 @@ export default function RotationSettings({ state, recordCount, onChange, onExpor
   return (
     <div className="space-y-6">
       <Card padding="lg">
-        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Extra duties</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Extra Duties</h2>
         <p className="text-sm text-[var(--color-text-muted)] mt-1 mb-4">
           Tick the classes each duty applies to. Duties move one kitchen per rotation. A kitchen never repeats a duty within a day, since the next period works the same station.
         </p>
@@ -60,7 +60,7 @@ export default function RotationSettings({ state, recordCount, onChange, onExpor
       </Card>
 
       <Card padding="lg">
-        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Job titles</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Job Titles</h2>
         <p className="text-sm text-[var(--color-text-muted)] mt-1 mb-4">
           Titles belong to the seat, not the student. A kitchen smaller than this list shows SPLIT for the leftover jobs, which the whole kitchen shares.
         </p>
@@ -76,7 +76,7 @@ export default function RotationSettings({ state, recordCount, onChange, onExpor
       </Card>
 
       <Card padding="lg">
-        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Participation records</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Participation Records</h2>
         <p className="text-sm text-[var(--color-text-muted)] mt-1 mb-4">
           Each rotation records what the class just finished, so rotate at the end of a session, not the start. The last 90 rotations per class are kept and sync across your devices. A class’s history is in its ⋮ menu.
         </p>

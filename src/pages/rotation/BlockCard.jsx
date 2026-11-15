@@ -62,15 +62,15 @@ export default function BlockCard({ state, blockId, roster, display, actions, vi
           {roster.status === 'error' && <span className="text-[var(--color-error)]"> · Couldn’t load the roster: {roster.error}</span>}
         </span>
         <span className="text-xs text-[var(--color-text-secondary)] truncate">
-          {labDay ? <>· Attendance from <b>{link.lab?.name}</b> (Lab tab)</> : '· No lab today: take attendance here'}
-          {!homeFromSettings && block.sectionId && ' · No home kitchens in Course Settings, using this seating'}
+          {labDay ? <>· Attendance: <b>{link.lab?.name}</b></> : '· No lab today: take attendance here'}
+          {!homeFromSettings && block.sectionId && ' · Home kitchens not set in Course Settings'}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" onClick={() => actions.advance(blockId)} disabled={nobodySeated}>Advance</Button>
           <Button size="sm" variant="secondary" icon={Maximize2} onClick={() => actions.fullscreen(blockId)} disabled={nobodySeated}>Full screen</Button>
           <BlockMenu
             items={[
-              { label: labDay ? 'Attendance (from the Lab tab)' : 'Attendance…', onClick: () => actions.attendance(blockId), disabled: nobodySeated || labDay },
+              { label: labDay ? 'Attendance (taken on the Grade tab today)' : 'Attendance…', onClick: () => actions.attendance(blockId), disabled: nobodySeated || labDay },
               { label: 'Rotation history', onClick: () => actions.history(blockId) },
               { label: 'Save as original', onClick: () => actions.saveOriginal(blockId), disabled: nobodySeated },
               { label: 'Restore to original', onClick: () => actions.restoreOriginal(blockId), disabled: !block.kitchens.some(k => k.original.length) },
@@ -101,7 +101,7 @@ export default function BlockCard({ state, blockId, roster, display, actions, vi
               const over = n > MAX_KITCHEN
               return (
                 <div key={ki} className={`px-2 py-1.5 text-center font-semibold border-l border-[var(--color-border-subtle)] ${over ? 'text-[var(--color-error)] bg-[var(--color-danger-fill)]' : active.includes(ki) ? 'text-[var(--color-text-body)]' : 'text-[var(--color-text-disabled)]'}`}
-                  title={over ? `${n} working: over the limit of ${MAX_KITCHEN}. Move someone in the Lab tab.` : undefined}>
+                  title={over ? `${n} working: over the limit of ${MAX_KITCHEN}. Move someone on the Grade tab.` : undefined}>
                   K{ki + 1}{over && ` · ${n} working`}
                 </div>
               )
@@ -121,7 +121,7 @@ export default function BlockCard({ state, blockId, roster, display, actions, vi
                     <Cell key={ki}>
                       <button
                         onClick={() => actions.student(blockId, uid)}
-                        title={away ? 'Out today — this job is shared by the kitchen' : visiting ? 'Visiting for today’s lab (moved in the Lab tab)' : 'Student options'}
+                        title={away ? 'Out today — this job is shared by the kitchen' : visiting ? 'Visiting another kitchen for today’s lab' : 'Student options'}
                         className={`w-full text-left px-1.5 py-1 rounded-[var(--radius-control)] truncate hover:bg-[var(--color-bg-hover)] text-[var(--color-text-body)] ${away ? 'line-through bg-[var(--color-danger-fill)]' : visiting ? 'shadow-[inset_0_0_0_2px_var(--color-bauhaus-blue)]' : ''}`}
                       >
                         {nameOf(uid)}

@@ -72,7 +72,7 @@ export default function SetupBootstrapModal({ courseId, courseName, setup, onSet
         </div>
 
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Professionalism assignment group</h3>
+          <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Professionalism Assignment Group</h3>
           {loadingGroups ? (
             <Skeleton height="2.5rem" />
           ) : group ? (

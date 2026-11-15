@@ -327,7 +327,7 @@ export default function RotationPage() {
                 <div className="space-y-5">
                   <p className="text-xs text-[var(--color-text-muted)]">
                     Rotate at the <b>end</b> of each class day: it records what the class just did, then moves everyone to the next job.
-                    {' '}Home kitchens come from Course Settings; on a lab day, absences and visits come from the Lab tab.
+                    {' '}Home kitchens come from Course Settings. On a lab day, attendance and kitchen moves come from the Grade tab.
                     {Object.values(rosters).some(r => r.status === 'error') && <button className="ml-2 underline" onClick={reloadRosters}>Retry loading rosters</button>}
                   </p>
                   {state.slots[day].map((id, pos) => id ? (

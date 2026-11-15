@@ -218,12 +218,12 @@ function CommentBank() {
 
   return (
     <div className="space-y-2 pt-4 border-t border-[var(--color-border-subtle)]">
-      <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Comment bank</h3>
+      <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Comment Bank</h3>
       <p className="text-xs text-[var(--color-text-muted)]">
-        Reusable feedback you can tap on each student in the Lab tab. It's added to the submission comment and doesn't change the score.
+        Reusable feedback you can tap on any student in the Grade tab. It’s added to their Canvas comment and doesn’t change the score.
       </p>
       {!bank ? <Skeleton height="3rem" /> : (
-        <Disclosure title="Saved comments" count={bank.length} defaultOpen={bank.length <= 6}>
+        <Disclosure title="Saved Comments" count={bank.length} defaultOpen={bank.length <= 6}>
           <div className="flex flex-wrap gap-2">
             {bank.map(c => (
               <span key={c} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
@@ -334,10 +334,10 @@ function TemplatesSection() {
   return (
     <Card className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Professionalism templates</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text-body)]">Professionalism Templates</h2>
         <p className="text-sm text-[var(--color-text-muted)]">
-          Reusable HTML deployed into a new Professionalism assignment's description. Pick a default per course in
-          Course settings, or choose one on the Lab tool's Create form when you make an assignment.
+          Reusable HTML added to a new Professionalism assignment’s description. Pick a default for each course in
+          Course Settings, or choose one when you create an assignment.
         </p>
       </div>
 
@@ -422,15 +422,15 @@ function GradingSection() {
       <div>
         <h2 className="text-base font-semibold text-[var(--color-text-body)]">Grading</h2>
         <p className="text-sm text-[var(--color-text-muted)]">
-          Your lab flags (deductions) and comment bank — one set for every course.
+          Lab flags and saved comments, shared by every course.
           Options for a single course (A/B days, journal dates, the top score, Focus sync) are under{' '}
-          <button type="button" className="underline hover:text-[var(--color-text-body)]" onClick={() => navigate('labs')}>Course settings</button>{' '}
-          on the Labs page.
+          <button type="button" className="underline hover:text-[var(--color-text-body)]" onClick={() => navigate('labs')}>Course Settings</button>{' '}
+          on the Assignments tab.
         </p>
       </div>
 
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Lab flags</h3>
+        <h3 className="text-sm font-semibold text-[var(--color-text-body)]">Lab Flags</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
           The checklist you tap when grading a lab. A clean kitchen scores the top;
           each kitchen flag lowers the score (a Major counts about twice a Minor), and each individual flag lowers
@@ -442,7 +442,7 @@ function GradingSection() {
         <Skeleton height="8rem" />
       ) : (
         <>
-          <Disclosure title="Kitchen flags" count={kitchen.length} defaultOpen={kitchen.length <= 5}>
+          <Disclosure title="Kitchen Flags" count={kitchen.length} defaultOpen={kitchen.length <= 5}>
             <FieldLabel>Apply to everyone in the kitchen</FieldLabel>
             <div className="space-y-2">
               {kitchen.map(f => (
@@ -464,8 +464,8 @@ function GradingSection() {
             <Button variant="secondary" size="sm" onClick={() => addFlag('kitchen')}>Add kitchen flag</Button>
           </Disclosure>
 
-          <Disclosure title="Individual flags" count={individual.length} defaultOpen={individual.length <= 5}>
-            <FieldLabel>Apply to one student (Minor drops one tier, Major two)</FieldLabel>
+          <Disclosure title="Individual Flags" count={individual.length} defaultOpen={individual.length <= 5}>
+            <FieldLabel>Apply to one student (Minor lowers their score one point, Major two)</FieldLabel>
             <div className="space-y-2">
               {individual.map(f => (
                 <div key={f.id} className="flex items-center gap-2">
@@ -535,7 +535,7 @@ function SecuritySection() {
           : <span className="flex items-center gap-1 text-[var(--color-text-muted)]"><ShieldOff size={15} /> PIN protection is off</span>}
       </div>
       <p className="text-xs text-[var(--color-text-muted)]">
-        When enabled, grade writeback requires this PIN after a period of inactivity.
+        When on, sending grades to Canvas asks for this PIN after a period of inactivity.
       </p>
       <div className="grid sm:grid-cols-2 gap-3 max-w-md">
         <div>

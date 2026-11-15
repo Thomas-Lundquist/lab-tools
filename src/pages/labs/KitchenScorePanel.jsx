@@ -734,8 +734,8 @@ export default function KitchenScorePanel({
           )}
 
           <p className="text-xs text-[var(--color-text-muted)]">
-            Edits autosave on this device. Nothing posts to Canvas until you commit.{' '}
-            Kitchen changes here stay with this lab — set a period’s usual kitchens in Course Settings.
+            Changes save on this device as you work and reach Canvas only when you commit.{' '}
+            Moving a student to another kitchen here applies to this lab only. Home kitchens are set in Course Settings.
           </p>
 
           {/* Sticky at the bottom of the screen: the period at a glance and Commit,
@@ -895,7 +895,7 @@ function StudentRowBase({ student, section, score, canvas, fullKey = '', homeKit
           <button
             type="button"
             onClick={acceptCanvas}
-            title={`Canvas currently holds ${mismatch}, not entered through Lab Tools. Click to accept it as this student's score.`}
+            title={`Canvas shows ${mismatch}, entered outside Lab Tools. Click to use it as this student’s score.`}
             className="shrink-0 flex flex-col items-center leading-none gap-0.5 px-1.5 py-0.5 rounded-[var(--radius-control)] border border-[var(--color-error)] text-[var(--color-error)] hover:bg-[var(--color-bg-hover)]"
           >
             <span className="text-sm font-bold">{mismatch}</span>
@@ -918,7 +918,7 @@ function StudentRowBase({ student, section, score, canvas, fullKey = '', homeKit
             <span className={`[grid-area:1/1] ${absent ? 'invisible' : ''}`} aria-hidden={absent || undefined}>
               <Chip tone="exceeded" active={!!st.exceeded}
                 onClick={() => onApply(s => setStudentExceeded(s, student.userId, !st.exceeded))}
-                title="Mark this student as exceeding expectations (a true 4)">Exceeded (4)</Chip>
+                title="Exceeded expectations: scores a full 4">Exceeded (4)</Chip>
             </span>
             <span className={`[grid-area:1/1] ${absent ? '' : 'invisible'}`} aria-hidden={!absent || undefined}>
               <Chip tone="excused" active={!!st.excused}
@@ -1015,7 +1015,7 @@ function StudentRowBase({ student, section, score, canvas, fullKey = '', homeKit
           onClose={() => setLibraryOpen(false)}
           footer={<Button onClick={() => setLibraryOpen(false)}>Done</Button>}
         >
-          <p className="text-xs text-[var(--color-text-muted)] mb-2">Tap to add or remove. These post as submission comments on commit.</p>
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">Tap to add or remove. They’re included in this student’s Canvas comment when you commit.</p>
           {libraryChips}
         </Modal>
       )}
@@ -1177,8 +1177,8 @@ function CommitPreview({ preview, presentUnassigned, entry, onToggleOverwrite })
           {summary.scoresPosted > 0 && <li><strong>{summary.scoresPosted}</strong> score{summary.scoresPosted === 1 ? '' : 's'}: {scoreLine}</li>}
           {summary.comments > 0 && <li><strong>{summary.comments}</strong> comment{summary.comments === 1 ? '' : 's'}</li>}
           {summary.absent > 0 && <li><strong>{summary.absent}</strong> absent (zero{entry.journalAssignmentId ? ', journal locked' : ''})</li>}
-          {summary.excused > 0 && <li><strong>{summary.excused}</strong> excused (Canvas excused — doesn't count against the grade)</li>}
-          {summary.returning > 0 && <li><strong>{summary.returning}</strong> back from absent (journal zero cleared, lock removed)</li>}
+          {summary.excused > 0 && <li><strong>{summary.excused}</strong> excused (doesn’t count against the grade)</li>}
+          {summary.returning > 0 && <li><strong>{summary.returning}</strong> back from absent (journal zero and lock removed)</li>}
           {summary.unchanged > 0 && <li className="text-[var(--color-text-muted)]">{summary.unchanged} already up to date — skipped</li>}
         </ul>
       )}

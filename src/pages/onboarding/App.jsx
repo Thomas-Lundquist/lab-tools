@@ -56,7 +56,7 @@ export default function App() {
         {step === 'checking' && (
           <div className="card p-12 text-center">
             <Loader size={40} className="animate-spin text-[var(--cpt-color-text)] mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-[var(--color-text-body)]">Checking your Canvas login...</h2>
+            <h2 className="text-lg font-semibold text-[var(--color-text-body)]">Checking your Canvas login…</h2>
             <p className="text-sm text-[var(--color-text-muted)] mt-2">Connecting to Canvas</p>
           </div>
         )}
