@@ -21,7 +21,7 @@ import { resolveFlags, flagIndex, FLAG_BY_ID } from '../../config/labFlags.js'
 import {
   getLabGrading, getAllLabGrading, saveDraft, commitLabGrading, discardDraft, isUnsavedDraft, revertLabGrading, periodStatus, sameSection,
   deriveSectionScores, emptySection,
-  toggleKitchenFlag, setKitchenExceeded, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
+  toggleKitchenFlag, setKitchenExceeded, setKitchenComment, setClassComment, toggleStudentFlag, setStudentKitchen, setPresent, setStudentComment, setStudentExceeded, toggleStudentLibraryComment,
   acceptCanvasScore, pickTeacherComment,
 } from '../../storage/labGrading.js'
 import { seedStandingKitchens, newestFirst, todaysLab, labDateFor, localToday, MAX_PER_KITCHEN } from '../../storage/kitchens.js'
@@ -630,6 +630,19 @@ export default function KitchenScorePanel({
 
       {!rosterLoading && entry && sectionId && roster.length > 0 && (
         <>
+          {/* Whole-class comment: posted, labeled, to every present student. */}
+          <Card className="border-2 border-[var(--color-border-strong)] space-y-1.5">
+            <label htmlFor="class-comment" className="block text-sm font-bold text-[var(--color-text-body)]">Whole class comment</label>
+            <textarea
+              id="class-comment"
+              rows={2}
+              value={section.classComment ?? ''}
+              onChange={e => applySection(s => setClassComment(s, e.target.value))}
+              placeholder="Optional. Posts to every present student as “Whole class comments: …”"
+              className="w-full text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)]"
+            />
+          </Card>
+
           {kitchenNumbers.map(k => {
             const members = roster.filter(s => section.students[s.userId]?.kitchen === k)
             const kflags = section.kitchens[k]?.flagIds ?? []
@@ -670,6 +683,16 @@ export default function KitchenScorePanel({
                       </div>
                     )}
                   </div>
+
+                  {/* Kitchen comment: posted, labeled, to each present member. */}
+                  <textarea
+                    rows={1}
+                    value={section.kitchens[k]?.comment ?? ''}
+                    onChange={e => applySection(s => setKitchenComment(s, k, e.target.value))}
+                    placeholder={`Kitchen ${k} comment (optional)`}
+                    aria-label={`Comment for everyone in Kitchen ${k}`}
+                    className="w-full text-sm px-2 py-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-bg-page)] text-[var(--color-text-body)]"
+                  />
 
                   {/* Roster for this kitchen. */}
                   <div className="divide-y divide-[var(--color-border-subtle)]">
